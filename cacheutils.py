@@ -13,7 +13,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import joblib
 
-import utils.persistutils as pstu
+import scpyutils.persistutils as pstu
 
 
 def get_func_name(func: Callable, include_module: bool = True) -> str:

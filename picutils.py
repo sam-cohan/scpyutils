@@ -1,6 +1,16 @@
-# This module makes use of exiftool wrapper library pyexiftool.
-# Make sure the exiftool is installed and available in your PATH.
-# brew install exiftool && pip install pyexiftool
+"""
+This module makes use of exiftool wrapper library pyexiftool.
+Make sure the exiftool is installed and available in your PATH.
+brew install exiftool && pip install pyexiftool
+
+You also need to install pyheif which requires to first install libheif: 
+brew install libheif
+
+To install requirements:
+pip install exifread pandas Pillow piexif pyheif reverse_geocode tqdm
+
+
+"""
 
 from collections import defaultdict
 import datetime
@@ -259,7 +269,7 @@ class GetMetaDatasAugmented:
 
 
 @memorize(
-    cache_dir="./.cache",
+    local_root="./.cache",
 )
 def get_metadatas_mproc(
     file_paths: List[str],
@@ -301,7 +311,7 @@ def cleaup_media_files(
     print(f"Getting metadatas for all media files...")
     metadatas = get_metadatas_mproc(  # pylint: disable=unexpected-keyword-arg
         file_paths=file_paths,
-        __refresh_cache=refresh_metacache
+        __force_refresh=refresh_metacache
     )
     print(f"Retrieved {len(metadatas):,.0f} metadatas.")
 
