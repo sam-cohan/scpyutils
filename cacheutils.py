@@ -11,7 +11,9 @@ import time
 from functools import wraps
 from typing import Any, Callable, List, Optional, Tuple, Union
 
+import dill
 import joblib
+import pandas as pd
 
 import scpyutils.persistutils as pstu
 
@@ -20,7 +22,7 @@ def get_func_name(func: Callable, include_module: bool = True) -> str:
     module_name = ""
     module = inspect.getmodule(func)
     if include_module and module is not None:
-        module_name = module.__name__
+        module_name = f"{module.__name__}."
     func_name = ""
     try:
         func_name = func.__name__
@@ -33,7 +35,7 @@ def get_func_name(func: Callable, include_module: bool = True) -> str:
             func_name = str(func)
     if func_name == "<lambda>":
         raise ValueError("lambda function does not have a name")
-    return f"{module_name}.{func_name}"
+    return f"{module_name}{func_name}"
 
 
 def get_hash(x: Any) -> str:
@@ -56,56 +58,156 @@ def get_hash(x: Any) -> str:
 
 
 class HashSafeWrapper:
+    """Class for wrapping objects to make them safe for use with memorize.
+
+    The main use of this class is to wrap functions and classes which need to be
+    passed as arguments to `memorize`. By default, the class will take the source of
+    the function or class and keep its hash on the `__hash_override__` attribute as
+    required by `memorize`. To actually decorate your functions, make use of
+    `wrap_for_memorize` function defined in this module.
+
+    """
+
+    KNOWN_TYPES = ["class", "function"]
+
     def __init__(
-        self, obj: Any, hash_salt: str = "", forced_hash_override: Optional[str] = None
+        self,
+        obj: Any,
+        strict: bool = True,
+        hash_salt: Optional[Any] = None,
+        hash_override: Optional[str] = None,
     ):
-        self._hash_salt = hash_salt
+        """Get a HashSafeWrapper instance.
+
+        Args:
+            obj: Any object (typically a function or class).
+            strict: Whether to get the source code for functions and classes. If False,
+                will try to use `__name__` or simply get the hash of the object string.
+                (defaults to True)
+            hash_salt: An optional salt used for hashing. This can be useful for
+                debugging. (defaults to None and no salt will be used).
+            hash_override: Provide a hash to override all other behavior. This can be
+                useful for debugging. (defaults to None)
+        """
         self._obj = obj
-        if inspect.isfunction(obj):
-            self._obj_str = get_func_name(obj)
+        self._hash_salt = hash_salt
+        self._strict = strict
+        self._hash_override = hash_override
+        if hash_override:
+            if strict:
+                raise ValueError("hash_override not compatible with strict!")
+            if hash_salt:
+                raise ValueError("hash_override not compatible with hash_salt!")
+        self._obj_type = (
+            "function"
+            if inspect.isfunction(obj)
+            else "class"
+            if inspect.isclass(obj)
+            else "?"
+        )
+        if self._obj_type == "function":
+            self.__doc__ = obj.__doc__
+            self._name = get_func_name(obj, include_module=not strict)
+        elif self._obj_type == "class":
+            self.__doc__ = obj.__doc__
+            self._name = obj.__name__ if strict else f"{obj.__module__}.{obj.__name__}"
         else:
-            self._obj_str = str(obj)
-        if forced_hash_override:
-            self._forced_hash_override: Optional[str] = forced_hash_override
-            self.__hash_override__ = forced_hash_override
+            self._name = getattr(obj, "__name__", str(obj))
+        if hash_override is not None:
+            self.__hash_override__ = hash_override
         else:
-            self._forced_hash_override = None
-            if hasattr(self._obj, "__hash_override__"):
-                self.__hash_override__ = self._obj.__hash_override__
+            if hasattr(obj, "__hash_override__"):
+                self.__hash_override__ = obj.__hash_override__
             else:
-                self.__hash_override__ = get_hash((self._hash_salt, self._obj_str))
+                if self._obj_type in self.KNOWN_TYPES:
+                    if strict:
+                        obj_src = inspect.getsource(obj)
+                    else:
+                        obj_src = f"<{self._obj_type} {self._name}>"
+                else:
+                    obj_src = str(obj)
+                    if "object at 0x" in obj_src:
+                        raise Exception(f"ERROR: obj={obj_src} cannot be made HashSafe")
+                self.__hash_override__ = get_hash(
+                    obj_src if hash_salt is None else (obj_src, hash_salt)
+                )
+        if self._obj_type in self.KNOWN_TYPES:
+            hash_in_name = f" src_hash:{self.__hash_override__[:16]}" if strict else ""
+            self.__name__ = f"<{self._obj_type} {self._name}{hash_in_name}>"
+        else:
+            self.__name__ = self._name
 
     def __hash__(self):
         return self.__hash_override__
+
+    def override_hash(self, hash_: str):
+        self.__hash_override__ = hash_
+        if self._obj_type in self.KNOWN_TYPES:
+            hash_in_name = f" src_hash:{hash_[:16]}" if self._strict else ""
+            self.__name__ = f"<{self._obj_type} {self._name}{hash_in_name}>"
+        return self
 
     @property
     def obj(self):
         return self._obj
 
+    def __call__(self, *args, **kwargs):
+        return self._obj(*args, **kwargs)
+
     def __str__(self):
-        return (
-            f"HashSafeWrapper("
-            f"{self._obj_str}"
-            f", hash_salt={self._hash_salt}"
-            f", forced_hash_override={self._forced_hash_override}"
-            ")"
-        )
+        return self.__name__
 
     __repr__ = __str__
+
+
+def wrap_for_memorize(
+    strict: bool = True,
+    hash_salt: Optional[Any] = None,
+    hash_override: Optional[str] = None,
+):
+    """Decorator generator for making an object hashable for use with memorize.
+
+    Args:
+        strict: Whether to get the source code for functions and classes. If False,
+            will try to use `__name__` or simply get the hash of the object string.
+            (defaults to True)
+        hash_salt: An optional salt used for hashing. This can be useful for
+            debugging. (defaults to None and no salt will be used).
+        hash_override: Provide a hash to override all other behavior. This can be
+            useful for debugging. (defaults to None)
+
+    Returns:
+       Decorator generator function that is safe to be used as argument to `memorize`d
+       function.
+    """
+
+    def wrap_for_memorize(func):
+        return HashSafeWrapper(
+            obj=func,
+            strict=strict,
+            hash_salt=hash_salt,
+            hash_override=hash_override,
+        )
+
+    return wrap_for_memorize
 
 
 def memorize(  # noqa=C901
     local_root: str,
     s3_root: Optional[str] = None,
     save_metadata: bool = True,
-    kwargs_formatters: List[Tuple[str, Callable]] = None,
+    kwargs_formatters: List[Tuple[str, Callable[[Any], str]]] = None,
     func_name_override: Optional[str] = None,
     num_args_to_ignore: int = 0,
     create_local_root: bool = True,
     strict: bool = False,
     max_filename_len: int = 255,
     hash_len: int = 16,
-    logger: Union[logging.Logger, Callable] = None,
+    file_ext: Optional[str] = None,
+    dump_format: str = "joblib",
+    save_func: Optional[Callable[[Any, str], bool]] = None,
+    load_func: Optional[Callable[[str], Any]] = None,
+    logger: Union[logging.Logger, Callable[[str], None]] = None,
 ):
     """Decorator for persisting results of generic functions. Note that the decorated
     function will accept the following special arguments starting with two and three
@@ -116,7 +218,7 @@ def memorize(  # noqa=C901
     __force_refresh (bool): Whether the cache should be refreshed even if it exists.
     __raise_on_error (bool): whether error in saving cache file should raise an
         exception. (Defaults to True)
-    __raise_on_cache_miss (bool): whehter cache miss should raise an exception. This
+    __raise_on_cache_miss (bool): whether cache miss should raise an exception. This
         is often useful for debugging cache misses (Defaults to False).
     __cache_key_prepend (str): optional string to append to the cache file name.
     __cache_key_append (str): optional string to append to cache file name.
@@ -131,14 +233,20 @@ def memorize(  # noqa=C901
     __func_name_override (Optional[str]): override for `func_name_override`.
     __strict (bool): override for `strict`.
     __max_filename_len (int): override for `max_filename_len`.
+    __file_ext (Optional[str]): override for `file_ext`.
+    __dump_format (str): override for `dump_format`.
+    __save_func (Optional[Callable[[Any, str], bool]]): override for `save_func`.
+    __load_func (Optional[Callable[[str], Any]]): override for `load_func`.
     __logger (logging.Logger|Callable): override for `logger`.
 
     Args:
         local_root: local cache directory
         s3_root: path to s3 in format "s3://<bucket>/<object_prefix>"
         save_metadata: Whether to save metadata about the function call.
-        kwargs_formatters: a dictionary of keyword args and their value_formatter
-            functions. Provide None or map to a constant to exclude arg from the
+        kwargs_formatters: A list of keyword args and their value_formatter
+            functions. A value_formatter function is a function that takes the arg
+            and returns a suitable representation of it to be included in the cache
+            file name. Provide None or map to a constant to exclude arg from the
             cache key.
         num_args_to_ignore: number of args which will not be taken into
             account in the creation of the cache_key. This can be useful for
@@ -156,13 +264,19 @@ def memorize(  # noqa=C901
             default). In file name is longer, the the long part will be replaced with
             a hash.
         hash_len: length of hexadecimal hash string.
+        file_ext: File extension. (default: None and will fall back to value of
+            `dump_format`)
+        dump_format: format of result if it is a DataFrame. Must be one of
+            {'dill', 'joblib', 'parquet', 'csv'} (default: 'joblib')
+        save_func: function that takes the result and the path and saves it.
+        load_func: function that takes the path to a result and loads it.
         logger: logging.Logger object, print, or any other logging function.
     """
 
     def memorize_(func):
-        hash_override = getattr(func, "__hash_override__", None)
-        if strict and hash_override is None:
-            hash_override = get_hash(func)[:hash_len]
+        func_src_hash = getattr(func, "__hash_override__", None)
+        if func_src_hash is None:
+            func_src_hash = get_hash(func)[:hash_len]
         _metadata = {}
         if save_metadata:
             _metadata["source"] = inspect.getsource(func)
@@ -185,6 +299,10 @@ def memorize(  # noqa=C901
                 "__func_name_override",
                 "__strict",
                 "__max_filename_len",
+                "__dump_format",
+                "__file_ext",
+                "__save_func",
+                "__load_func",
                 "__logger",
             ]
         )
@@ -196,6 +314,15 @@ def memorize(  # noqa=C901
             )
             if _ignore_cache:
                 return func(*args, **kwargs)
+            _save_metadata = kwargs.pop(
+                "___save_metadata", kwargs.get("__save_metadata", save_metadata)
+            )
+            if _save_metadata:
+                # Opted to put this here even though it can slightly slow down cache
+                # reads because we can still gain back perf by passing override for
+                # __save_metadata=False
+                _metadata["args"] = [str(x) for x in args]
+                _metadata["kwargs"] = {k: str(v) for k, v in kwargs.items()}
 
             _force_refresh = kwargs.pop(
                 "___force_refresh", kwargs.get("__force_refresh", False)
@@ -217,9 +344,6 @@ def memorize(  # noqa=C901
                 "___local_root", kwargs.get("__local_root", local_root)
             )
             _s3_root = kwargs.pop("___s3_root", kwargs.get("__s3_root", s3_root))
-            _save_metadata = kwargs.pop(
-                "___save_metadata", kwargs.get("__save_metadata", save_metadata)
-            )
             _kwargs_formatters = (
                 kwargs.pop(
                     "___kwargs_formatters",
@@ -239,6 +363,22 @@ def memorize(  # noqa=C901
             _max_filename_len = kwargs.pop(
                 "___max_filename_len",
                 kwargs.get("__max_filename_len", max_filename_len),
+            )
+            _file_ext = kwargs.pop("___file_ext", kwargs.get("__file_ext", file_ext))
+            _dump_format = kwargs.pop(
+                "___dump_format", kwargs.get("__dump_format", dump_format)
+            )
+            assert _dump_format in {
+                "dill",
+                "joblib",
+                "parquet",
+                "csv",
+            }, f"dump_format={dump_format} not supported!"
+            _save_func = kwargs.pop(
+                "___save_func", kwargs.get("__save_func", save_func)
+            )
+            _load_func = kwargs.pop(
+                "___load_func", kwargs.get("__load_func", load_func)
             )
             _logger = kwargs.pop("___logger", kwargs.get("__logger", logger))
             if not _logger:
@@ -279,15 +419,23 @@ def memorize(  # noqa=C901
             remaining_kwargs = {
                 k: v for k, v in kwargs.items() if k not in dict(_kwargs_formatters)
             }
+            _kwargs_in_hash = {
+                k: v
+                for k, v in remaining_kwargs.items()
+                if k not in _special_kwargs_set
+            }
             if _strict:
-                remaining_kwargs["src_hash"] = hash_override
+                _kwargs_in_hash["src_hash"] = func_src_hash
             _remaining_kwargs_hash = (
-                get_hash(remaining_kwargs)[:hash_len] if remaining_kwargs else ""
+                get_hash(_kwargs_in_hash)[:hash_len] if _kwargs_in_hash else ""
             )
             if _func_name_override is None:
                 _func_name = func.__name__
             else:
                 _func_name = func_name_override
+            if _file_ext is None:
+                _file_ext = _dump_format
+            _file_ext = f".{_file_ext}"
             _filename = (
                 "__".join(
                     [
@@ -305,7 +453,7 @@ def memorize(  # noqa=C901
                         if x
                     ]
                 )
-                + ".joblib"
+                + _file_ext
             )
             if _max_filename_len and len(_filename) > _max_filename_len:
                 getattr(_logger, "warning", _logger)(
@@ -315,17 +463,17 @@ def memorize(  # noqa=C901
                 _filename = (
                     f"{_filename[:_max_filename_len - 46]}"
                     f"__{get_hash(_filename[_max_filename_len - 46:])[:hash_len]}"
-                    ".joblib"
+                    f"{_file_ext}"
                 )
             _local_path = os.path.join(_local_root, _filename)
             _s3_path = os.path.join(_s3_root, _filename) if _s3_root else None
             _local_metadata_path = (
-                re.sub(".joblib$", ".meta.json", _local_path)
+                (_local_path.rsplit(".", 1)[0] + ".meta.json")
                 if _save_metadata
                 else None
             )
             _s3_metadata_path = (
-                re.sub(".joblib$", ".meta.json", _s3_path)
+                (_s3_path.rsplit(".", 1)[0] + ".meta.json")
                 if _s3_path and _save_metadata
                 else None
             )
@@ -338,7 +486,7 @@ def memorize(  # noqa=C901
                     s3_path_exists = pstu.exists_in_s3(_s3_path)
                     if not s3_path_exists:
                         getattr(_logger, "info", _logger)(
-                            f"No s3 cache file found at '{_s3_path}''"
+                            f"No s3 cache file found at '{_s3_path}'"
                         )
                     else:
                         getattr(_logger, "info", _logger)(
@@ -351,12 +499,36 @@ def memorize(  # noqa=C901
                             silent=True,
                             raise_on_error=_raise_on_error,
                         )
+                        if _save_metadata:
+                            getattr(_logger, "info", _logger)(
+                                "Downloading meta file from:"
+                                f" '{_s3_metadata_path}' to '{_local_metadata_path}'"
+                            )
+                            try:
+                                pstu.download_file_from_s3(
+                                    s3_path=_s3_metadata_path,
+                                    local_path=_local_metadata_path,
+                                    silent=True,
+                                    raise_on_error=True,
+                                )
+                            except Exception as e:
+                                getattr(_logger, "error", _logger)(
+                                    "ERROR: Failed to download meta file from:"
+                                    f" '{_s3_metadata_path}' {e}"
+                                )
                 local_cache_exists = os.path.isfile(_local_path)
             if local_cache_exists and not _force_refresh:
                 getattr(_logger, "info", _logger)(
                     f"Loading from cache file: '{_local_path}' ..."
                 )
-                res = joblib.load(_local_path)
+                if _load_func:
+                    res = load_func(_local_path)
+                elif _dump_format in {"parquet", "csv"}:
+                    res = getattr(pd, f"read_{_dump_format}")(_local_path)
+                elif _dump_format == "dill":
+                    res = dill.load(open(_local_path, "rb"))
+                else:
+                    res = joblib.load(_local_path)
             else:
                 if not local_cache_exists:
                     if _raise_on_cache_miss:
@@ -377,16 +549,25 @@ def memorize(  # noqa=C901
                 )
                 if create_local_root:
                     pstu.ensure_dirs(_local_root, raise_on_error=False)
-                cache_dumped = pstu.dump_local(
-                    obj=res,
-                    path=_local_path,
-                    create_dirs=False,
-                    silent=True,
-                    raise_on_error=_raise_on_error,
-                )
-                if not cache_dumped:
-                    getattr(_logger, "error", _logger)(
-                        f"ERROR: failed to save cache file '{_local_path}'"
+                try:
+                    if _save_func:
+                        _save_func(res, _local_path)
+                    elif _dump_format in {"parquet", "csv"}:
+                        getattr(res, f"to_{_dump_format}")(
+                            _local_path, index=all(res.index.names)
+                        )
+                    else:
+                        pstu.dump_local(
+                            obj=res,
+                            path=_local_path,
+                            dump_format=_dump_format,
+                            create_dirs=False,
+                            silent=True,
+                            raise_on_error=True,
+                        )
+                except Exception as e:
+                    getattr(_logger, "exception", _logger)(
+                        f"ERROR: failed to save cache file '{_local_path}' : {e}"
                     )
                     _local_path = None
 
@@ -398,8 +579,6 @@ def memorize(  # noqa=C901
                     _metadata["start_time"] = start_time
                     _metadata["end_time"] = end_time
                     _metadata["duration"] = duration
-                    _metadata["args"] = args
-                    _metadata["kwargs"] = kwargs
                     _metadata["filename"] = _filename
                     getattr(_logger, "info", _logger)(
                         f"Saving metadata file to '{_local_metadata_path}' ..."
@@ -459,10 +638,37 @@ def memorize(  # noqa=C901
 
             return res
 
-        memorize__.__hash_override__ = hash_override
+        memorize__.__hash_override__ = func_src_hash
         return memorize__
 
     return memorize_
+
+
+def memorize_with_hashable_args(func):
+    """Decorator for fast caching of functions which have hashable args.
+    Note that it will convert np.NaN to None for caching to avoid this common
+    case causing a cache miss.
+    """
+
+    _cached_results_ = {}
+    hash_override = getattr(func, "__hash_override__", None)
+    if hash_override is None:
+        hash_override = get_hash(func)
+
+    @wraps(func)
+    def memorized(*args):
+        try:
+            lookup_args = tuple(x if pd.notnull(x) else None for x in args)
+            res = _cached_results_[lookup_args]
+        except KeyError:
+            res = func(*args)
+            _cached_results_[lookup_args] = res
+        return res
+
+    memorized._cached_results_ = _cached_results_
+    memorized.__hash_override__ = hash_override
+
+    return memorized
 
 
 def memoize(func):
