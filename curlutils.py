@@ -1,14 +1,12 @@
 from io import BytesIO
 from urllib.parse import urlencode
+
 import pycurl
 
 
-def curl(url,
-         post_data=None,
-         user_pwd=None,
-         headers=None,
-         custom_request=None,
-         cookies=None):
+def curl(
+    url, post_data=None, user_pwd=None, headers=None, custom_request=None, cookies=None
+):
     b = BytesIO()
     c = pycurl.Curl()
     c.setopt(c.WRITEDATA, b)
@@ -29,14 +27,14 @@ def curl(url,
     c.perform()
     c.close()
     body = b.getvalue()
-    return body.decode('iso-8859-1')
+    return body.decode("iso-8859-1")
 
 
 def get_run_args(url, headers=None, max_time=5):
     headers = headers or {}
     run_args = ["curl"]
     for k, v in headers.items():
-        run_args.append('-H')
+        run_args.append("-H")
         run_args.append(k + ": " + v)
     run_args.append("-s")
     run_args.append(url)

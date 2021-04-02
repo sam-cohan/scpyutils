@@ -12,19 +12,19 @@ pip install exifread pandas Pillow piexif pyheif reverse_geocode tqdm
 
 """
 
-from collections import defaultdict
 import datetime
 import hashlib
 import json
-import os
 import multiprocessing as mproc
+import os
 import re
 import shutil
 import subprocess
+from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Union
 
-import exiftool
 import exifread
+import exiftool
 import pandas as pd
 import PIL
 import reverse_geocode
@@ -69,8 +69,7 @@ MEDIA_EXT_RE = "(arw|avi|cr2|dat|divx|gif|heic|jpe?g|mkv|mp4|mov|mpg|png|tiff?)$
 
 
 def get_hash_from_metadata(metadata: dict):
-    hash_content = str(
-        sorted([(k, v) for k, v in metadata.items() if k in HASH_KEYS]))
+    hash_content = str(sorted([(k, v) for k, v in metadata.items() if k in HASH_KEYS]))
     return hashlib.sha1(hash_content.encode()).hexdigest()[:16]
 
 
@@ -122,6 +121,7 @@ def get_exif(file_path):
     """
     if file_path[-4:].lower() == ".jpg":
         import exifread
+
         return exifread.process_file(open(file_path, "rb"))
     if file_path[-5:].lower() == ".heic":
         # Install pyheif with:
@@ -129,9 +129,12 @@ def get_exif(file_path):
         # pip install git+https://github.com/david-poirier-csn/pyheif.git
         import pyheif
         import piexif
+
         return {
             f"{k} {piexif.TAGS[k][kk]['name']}": vv
-            for k, v in piexif.load(pyheif.read_heif(file_path).metadata[0]["data"]).items()
+            for k, v in piexif.load(
+                pyheif.read_heif(file_path).metadata[0]["data"]
+            ).items()
             for kk, vv in (v.items() if v and isinstance(v, dict) else [])
         }
     raise Exception("File not supported!")
@@ -171,18 +174,18 @@ def get_lat_lng_from_exif(exif) -> Optional[Tuple[float, float]]:
     lat = None
     lng = None
 
-    gps_latitude = _get_if_exist(exif, 'GPS GPSLatitude')
-    gps_latitude_ref = _get_if_exist(exif, 'GPS GPSLatitudeRef')
-    gps_longitude = _get_if_exist(exif, 'GPS GPSLongitude')
-    gps_longitude_ref = _get_if_exist(exif, 'GPS GPSLongitudeRef')
+    gps_latitude = _get_if_exist(exif, "GPS GPSLatitude")
+    gps_latitude_ref = _get_if_exist(exif, "GPS GPSLatitudeRef")
+    gps_longitude = _get_if_exist(exif, "GPS GPSLongitude")
+    gps_longitude_ref = _get_if_exist(exif, "GPS GPSLongitudeRef")
 
     if gps_latitude and gps_latitude_ref and gps_longitude and gps_longitude_ref:
         lat = _convert_to_degress(gps_latitude.values)
-        if gps_latitude_ref.values[0] != 'N':
+        if gps_latitude_ref.values[0] != "N":
             lat = 0 - lat
 
         lng = _convert_to_degress(gps_longitude.values)
-        if gps_longitude_ref.values[0] != 'E':
+        if gps_longitude_ref.values[0] != "E":
             lng = 0 - lng
 
     return (lat, lng) if (lat and lng) else None
@@ -214,11 +217,10 @@ def get_create_dt_from_metadata(metadata: dict) -> Optional[pd.Timestamp]:
         "EXIF:ModifyDate",
         "QuickTime:CreateDate",
         "RIFF:DateTimeOriginal",
-        "File:FileModifyDate"
+        "File:FileModifyDate",
     ]:
         try:
-            dt = pd.to_datetime(
-                metadata[fld].replace(":", "-", 2))
+            dt = pd.to_datetime(metadata[fld].replace(":", "-", 2))
             break
         except:
             pass
@@ -234,7 +236,7 @@ def get_create_dt(file_path: str) -> Optional[pd.Timestamp]:
 
 def get_batches(lst: List, batch_size: int) -> List[List]:
     batch_size = max(1, batch_size)
-    return (lst[i:i+batch_size] for i in range(0, len(lst), batch_size))
+    return (lst[i : i + batch_size] for i in range(0, len(lst), batch_size))
 
 
 class GetMetaDatasAugmented:
@@ -262,7 +264,8 @@ class GetMetaDatasAugmented:
                 f"{f'__{loc}' if loc else ''}"
                 f"{f'__{base_name}' if self.include_orig_name_in_dest else ''}"
                 f"{f'__{metadata_hash}' if self.include_metadata_hash_in_dest else ''}"
-                f".{ext.lower()}")
+                f".{ext.lower()}"
+            )
             metadata["DestFileBase"] = new_file_name
 
         return metadatas
@@ -286,9 +289,10 @@ def get_metadatas_mproc(
                     GetMetaDatasAugmented(
                         include_orig_name_in_dest=include_orig_name_in_dest,
                     ),
-                    file_path_batches
+                    file_path_batches,
                 ),
-                total=len(file_path_batches))
+                total=len(file_path_batches),
+            )
         )
         metadatas = [m for mb in matadata_batches for m in mb]
     return metadatas
@@ -301,8 +305,10 @@ def cleaup_media_files(
     refresh_metacache: bool = False,
     move_or_copy: str = "move",
 ):
-    assert move_or_copy in ["move", "copy"], \
-        f"move_or_copy='{move_or_copy}' must be 'move' or 'copy"
+    assert move_or_copy in [
+        "move",
+        "copy",
+    ], f"move_or_copy='{move_or_copy}' must be 'move' or 'copy"
     move_or_copy = shutil.move if move_or_copy == "move" else shutil.copy2
     print("Getting all source media files...")
     file_paths = sorted(get_all_media_file_paths(src_root_dir))
@@ -310,26 +316,23 @@ def cleaup_media_files(
 
     print(f"Getting metadatas for all media files...")
     metadatas = get_metadatas_mproc(  # pylint: disable=unexpected-keyword-arg
-        file_paths=file_paths,
-        __force_refresh=refresh_metacache
+        file_paths=file_paths, __force_refresh=refresh_metacache
     )
     print(f"Retrieved {len(metadatas):,.0f} metadatas.")
 
     dest_file_src_files = defaultdict(list)
     for metadata in metadatas:
-        dest_file_src_files[metadata["DestFileBase"]].append(
-            metadata["SourceFile"])
+        dest_file_src_files[metadata["DestFileBase"]].append(metadata["SourceFile"])
     duplicates = [
         (dest, srcs) for dest, srcs in dest_file_src_files.items() if len(srcs) > 1
     ]
     if duplicates:
-        print(
-            f"WARNING: found {len(duplicates):,.0f} duplicate source media files.")
+        print(f"WARNING: found {len(duplicates):,.0f} duplicate source media files.")
 
     # Create yearly folders for destination
-    dest_years = sorted(set([
-        dest_file_base[:4] for dest_file_base in dest_file_src_files
-    ]))
+    dest_years = sorted(
+        set([dest_file_base[:4] for dest_file_base in dest_file_src_files])
+    )
     for dest_year in dest_years:
         dest_dir = os.path.join(dest_root_dir, dest_year)
         if not os.path.exists(dest_dir):
@@ -347,11 +350,12 @@ def cleaup_media_files(
     unexpected_err_cnt = 0
     success_cnt = 0
     with open(log_file_path, "a") as log_file:
-        for dest_file_base, src_file_paths in tqdm_notebook(sorted(dest_file_src_files.items())):
+        for dest_file_base, src_file_paths in tqdm_notebook(
+            sorted(dest_file_src_files.items())
+        ):
             # Make sure the dest_file_path includes the year of the file.
             dest_year = dest_file_base[:4]
-            dest_file_path = os.path.join(
-                dest_root_dir, dest_year, dest_file_base)
+            dest_file_path = os.path.join(dest_root_dir, dest_year, dest_file_base)
 
             # Move the first available source file.
             src_file_path = src_file_paths[0]
@@ -382,15 +386,11 @@ def cleaup_media_files(
             rows.append(row)
 
         if success_cnt:
-            print(
-                f"Successfully moved {success_cnt:,.0f} files!")
+            print(f"Successfully moved {success_cnt:,.0f} files!")
         else:
             print("WARNING: NO FILES WERE MOVED!")
         if dest_exists_cnt:
-            print(
-                f"WARNING: {dest_exists_cnt:,.0f} destinations already existed!"
-            )
+            print(f"WARNING: {dest_exists_cnt:,.0f} destinations already existed!")
         if unexpected_err_cnt:
-            print(
-                f"ERROR: Encountered {unexpected_err_cnt:,.0f} unexpected errors!")
+            print(f"ERROR: Encountered {unexpected_err_cnt:,.0f} unexpected errors!")
     return rows

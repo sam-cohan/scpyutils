@@ -1,8 +1,8 @@
-from collections import Counter
 import datetime
 import math
-from multiprocessing import cpu_count, Pool
 import re
+from collections import Counter
+from multiprocessing import Pool, cpu_count
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -13,7 +13,6 @@ from pandas import Interval
 from .cacheutils import get_hash
 from .formatutils import try_fmt_num
 from .logutils import setup_logger
-
 
 LOGGER = setup_logger(__name__)
 
@@ -34,20 +33,18 @@ def get_sorted_intervals(interval_str_list):
     This is often useful after a merge of two categorical interval fields
     loses its order.
     """
-    return sorted(interval_str_list,
-                  key=lambda x: float(
-                      INTERVAL_RE.sub(r"\1", x)
-                      if INTERVAL_RE.match(str(x)) else -np.inf))
+    return sorted(
+        interval_str_list,
+        key=lambda x: float(
+            INTERVAL_RE.sub(r"\1", x) if INTERVAL_RE.match(str(x)) else -np.inf
+        ),
+    )
 
 
 class DataPartitioner:
     """Abstract base class for partitioning data and iteratin over the partitions."""
 
-    def __call__(
-        self,
-        df: Union[List, pd.DataFrame, pd.Series, np.ndarray],
-        **meta
-    ):
+    def __call__(self, df: Union[List, pd.DataFrame, pd.Series, np.ndarray], **meta):
         raise NotImplementedError()
 
 
@@ -56,7 +53,9 @@ class DataMerger:
 
     def __call__(
         self,
-        res_list: Union[List[List], List[pd.DataFrame], List[pd.Series], List[np.ndarray]],
+        res_list: Union[
+            List[List], List[pd.DataFrame], List[pd.Series], List[np.ndarray]
+        ],
     ) -> Union[List, pd.DataFrame, pd.Series, np.ndarray]:
         raise NotImplementedError()
 
@@ -112,12 +111,14 @@ class GenericDataPartitioner(DataPartitioner):
                 self.partition_fld_needs_hashing = True
             elif self.partition_fld:
                 self.partition_fld_needs_hashing = False
-        assert self.partition_fld or self.n_parts, \
-            "Please provide n_parts or partition_fld to GenericDataPartitioner"
+        assert (
+            self.partition_fld or self.n_parts
+        ), "Please provide n_parts or partition_fld to GenericDataPartitioner"
         if self.partition_fld_needs_hashing and partition_fld_needs_hashing is None:
             warn_msg = (
                 "To get rid of this warning pass in the partition_fld_needs_hashing"
-                f" for partition_fld='{self.partition_fld}' explicitly! Guessing you want it to be True.")
+                f" for partition_fld='{self.partition_fld}' explicitly! Guessing you want it to be True."
+            )
             LOGGER.warning(warn_msg)
 
     def __call__(self, df: Union[List, pd.DataFrame, pd.Series, np.ndarray], **meta):
@@ -126,7 +127,15 @@ class GenericDataPartitioner(DataPartitioner):
             if self.partition_fld == "__index__":
                 if len(df.index.names) > 1:
                     partition_vals = np.array(
-                        list(zip(*[df.index.get_level_values(i) for i in range(len(df.index.names))])))
+                        list(
+                            zip(
+                                *[
+                                    df.index.get_level_values(i)
+                                    for i in range(len(df.index.names))
+                                ]
+                            )
+                        )
+                    )
                 else:
                     partition_vals = df.index.values
             if self.partition_fld == "__vals__":
@@ -139,8 +148,7 @@ class GenericDataPartitioner(DataPartitioner):
             len_part = math.ceil(len_df / self.n_parts)
             mark_idx = len_part
             if isinstance(df, (list, np.ndarray)):
-                partition_vals = list(
-                    range(len_part, len_df, len_part)) + [len_df - 1]
+                partition_vals = list(range(len_part, len_df, len_part)) + [len_df - 1]
                 print(partition_vals, self.n_parts, len_df, len_part)
             else:
                 while mark_idx < len_df:
@@ -150,20 +158,24 @@ class GenericDataPartitioner(DataPartitioner):
 
         if self.partition_fld_needs_hashing:
             import hashlib
+
             partition_vals = np.vectorize(
-                lambda x: int(hashlib.sha1(
-                    str(x).encode()).hexdigest()[-2:], 16)
+                lambda x: int(hashlib.sha1(str(x).encode()).hexdigest()[-2:], 16)
             )(partition_vals)
         if self.n_parts and self.partition_fld:
             partition_vals = np.remainder(partition_vals, self.n_parts)
-        assert not np.any(pd.isnull(partition_vals)
-                          ), "ERROR: partition values cannot be null"
+        assert not np.any(
+            pd.isnull(partition_vals)
+        ), "ERROR: partition values cannot be null"
         unique_partition_vals = sorted(set(partition_vals))
-        assert len(unique_partition_vals) <= 64, "ERROR: {:,.0f} is too many partitions to handle".format(
-            len(unique_partition_vals))
+        assert (
+            len(unique_partition_vals) <= 64
+        ), "ERROR: {:,.0f} is too many partitions to handle".format(
+            len(unique_partition_vals)
+        )
         for i, partition_val in enumerate(unique_partition_vals):
             if isinstance(df, (list, np.ndarray)):
-                partition = df[(i or unique_partition_vals[i]): partition_val]
+                partition = df[(i or unique_partition_vals[i]) : partition_val]
             else:
                 partition = df.loc[partition_vals == partition_val]
                 # _is_copy is deprecated as of 0.23.0, may have to live with warning
@@ -179,7 +191,9 @@ class GenericDataPartitioner(DataPartitioner):
 class GenericDataMerger(DataMerger):
     def __call__(
         self,
-        res_list: Union[List[List], List[pd.DataFrame], List[pd.Series], List[np.ndarray]],
+        res_list: Union[
+            List[List], List[pd.DataFrame], List[pd.Series], List[np.ndarray]
+        ],
     ) -> Union[List, pd.DataFrame, pd.Series, np.ndarray]:
         """Concatenates a list of lists, DataFrames, Series, or numpy arrays.
 
@@ -208,19 +222,24 @@ class GenericDataMerger(DataMerger):
                 # This is a crude workaround which does not guarantee original sort order
                 # force the sort order to be string-based with fields which are already string at the top
                 df[fld].cat.reorder_categories(
-                    sorted(df[fld].cat.categories,
-                           key=lambda x: str(x) if not isinstance(x, str) else " {}".format(x)),
+                    sorted(
+                        df[fld].cat.categories,
+                        key=lambda x: str(x)
+                        if not isinstance(x, str)
+                        else " {}".format(x),
+                    ),
                     ordered=True,
-                    inplace=True,)
+                    inplace=True,
+                )
         return df
 
 
 def apply_parallel(
-        func: Callable,
-        df: Union[List, pd.DataFrame, pd.Series, np.ndarray],
-        partitioner: DataPartitioner = None,
-        merger: DataMerger = None,
-        pool_size: Optional[int] = None
+    func: Callable,
+    df: Union[List, pd.DataFrame, pd.Series, np.ndarray],
+    partitioner: DataPartitioner = None,
+    merger: DataMerger = None,
+    pool_size: Optional[int] = None,
 ) -> Union[pd.DataFrame, pd.Series]:
     """Apply a function to a DataFrame with n_parts parallel processes.
 
@@ -258,8 +277,8 @@ def apply_parallel(
 
 def get_pd_friendly_col_name(col: Any) -> str:
     return re.sub(
-        "[^A-Za-z0-9_]", "_",
-        re.sub("^([^_A-Za-z])", "_\g<1>", str(col)))  # pylint: disable=anomalous-backslash-in-string  # noqa=W605
+        "[^A-Za-z0-9_]", "_", re.sub("^([^_A-Za-z])", "_\g<1>", str(col))
+    )  # pylint: disable=anomalous-backslash-in-string  # noqa=W605
 
 
 def flatten_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -287,7 +306,13 @@ def get_datetime_int_from_epoch(
     Returns:
         (int) something like 20190101.
     """
-    return pd.to_datetime(sr, unit=unit).dt.floor("1D").astype("str").str.replace("-", "").astype(int)
+    return (
+        pd.to_datetime(sr, unit=unit)
+        .dt.floor("1D")
+        .astype("str")
+        .str.replace("-", "")
+        .astype(int)
+    )
 
 
 def is_null_or_zero(x: Any) -> bool:
@@ -316,14 +341,14 @@ def unique_count(sr: Union[pd.Series, List]) -> int:
 
 
 def reduce_unique_sorted(
-        sr: Union[pd.Series, List],
-        old_delim: str = ", ",
-        new_delim: str = ", ") -> List[str]:
+    sr: Union[pd.Series, List], old_delim: str = ", ", new_delim: str = ", "
+) -> List[str]:
     """Given a series, force it to be string and reduce it into a delim-separated sorted set.
     Useful for aggregating groupby results.
     """
     return new_delim.join(
-        sorted(set([val for vals in sr for val in str(vals).split(old_delim)])))
+        sorted(set([val for vals in sr for val in str(vals).split(old_delim)]))
+    )
 
 
 def reduce_value_counts(sr: Union[pd.Series, List]) -> List[Any]:
@@ -340,7 +365,9 @@ def reduce_value_counts(sr: Union[pd.Series, List]) -> List[Any]:
 
 def reduce_value_counts_as_str(sr: Union[pd.Series, List]) -> str:
     """Given a series, return the value_counts() in sorted string representation."""
-    return " | ".join(["{}: {:.0f}".format(val, cnt) for val, cnt in reduce_value_counts(sr)])
+    return " | ".join(
+        ["{}: {:.0f}".format(val, cnt) for val, cnt in reduce_value_counts(sr)]
+    )
 
 
 def try_strip(x: Any) -> Any:
@@ -354,10 +381,7 @@ def force_strip_str(x: Any) -> str:
 
 
 def get_unique_sorted(
-    sr: pd.Series,
-    old_delim: str = ", ",
-    new_delim: str = ", ",
-    fillna: str = ''
+    sr: pd.Series, old_delim: str = ", ", new_delim: str = ", ", fillna: str = ""
 ):
     """Given a Series which points to old_delim-separated string data, returns a new Series
     with new_delim-separated string data which is unique and sorted
@@ -384,25 +408,23 @@ def get_unique_sorted(
 def dummy_agg(func_name: str) -> Callable:
     """If you are aggregating a groupby where some fields are a function of others,
     it is much faster to reserve room for them and then fill them in later."""
+
     def agg_func(_):
         return np.nan
+
     agg_func.__name__ = func_name
     return agg_func
 
 
-def apply_dim_filters(
-    df: pd.DataFrame,
-    dim_filters: Dict,
-    verbose: bool = True
-):
+def apply_dim_filters(df: pd.DataFrame, dim_filters: Dict, verbose: bool = True):
     """Given a DataFrame with MultiIndex, and a dictionary mapping index field
     names to list of values, return a view of the df with only matching records.
     """
     if set(dim_filters) - set(df.index.names):
         raise Exception(
-            f"dim_filter={list(dim_filters)} not all available in index={df.index.names}")
-    indexer = tuple(dim_filters.get(fld, slice(None))
-                    for fld in df.index.names)
+            f"dim_filter={list(dim_filters)} not all available in index={df.index.names}"
+        )
+    indexer = tuple(dim_filters.get(fld, slice(None)) for fld in df.index.names)
     if verbose:
         info_msg = f"Applying dim_filters: {dim_filters} (size={len(df):,.0f})... "
         print(info_msg, end="", flush=True)
@@ -442,10 +464,10 @@ def safe_fillna(
 
 
 def safe_sort(
-        df: pd.DataFrame,
-        sort_fld: Union[str, List[str]],
-        ascending: Union[bool, List[bool]] = True,
-        inplace: bool = False
+    df: pd.DataFrame,
+    sort_fld: Union[str, List[str]],
+    ascending: Union[bool, List[bool]] = True,
+    inplace: bool = False,
 ) -> pd.DataFrame:
     """Sort a DataFrame regardless of whether the field is in index or columns.
     Note that if a field is not sortable because of TypeError, this will
@@ -481,30 +503,33 @@ def safe_sort(
         else:
             warn_msg = (
                 f"sort_fld={sort_fld} not in index={list(df.index.names)}"
-                f" or columns={list(df.columns.values)}")
+                f" or columns={list(df.columns.values)}"
+            )
             LOGGER.warning(warn_msg)
             return df
 
     if sort_func == "vals":
         if inplace:
-            df.sort_values(by=sort_fld, ascending=ascending,
-                           inplace=True, kind="mergesort")
+            df.sort_values(
+                by=sort_fld, ascending=ascending, inplace=True, kind="mergesort"
+            )
         else:
             return df.sort_values(by=sort_fld, ascending=ascending, kind="mergesort")
     elif sort_func == "index":
         if inplace:
-            df.sort_index(level=sort_fld, ascending=ascending,
-                          inplace=True, kind="mergesort")
+            df.sort_index(
+                level=sort_fld, ascending=ascending, inplace=True, kind="mergesort"
+            )
         else:
             return df.sort_index(level=sort_fld, ascending=ascending, kind="mergesort")
 
 
 def get_sorted_groups(
-        df: pd.DataFrame,
-        sort_fld: str,
-        groupby_flds: List[str] = None,
-        ascending: bool = False,
-        drop_group_totals: bool = True
+    df: pd.DataFrame,
+    sort_fld: str,
+    groupby_flds: List[str] = None,
+    ascending: bool = False,
+    drop_group_totals: bool = True,
 ) -> pd.DataFrame:
     """Sort a DataFrame by its group totals. (uses stable sorting algorithm).
 
@@ -526,7 +551,8 @@ def get_sorted_groups(
     if groupby_flds is None:
         groupby_flds = df.index.names[:-1]
     totals_fld = "{}_{}_totals".format(
-        "_".join([str(c) for c in groupby_flds]), sort_fld)
+        "_".join([str(c) for c in groupby_flds]), sort_fld
+    )
     df[totals_fld] = df.groupby(groupby_flds)[sort_fld].transform(np.sum)
     # df = df.sort_values(by=totals_fld, ascending=ascending, kind="mergesort")
     df = safe_sort(df, sort_fld=totals_fld, ascending=ascending)
@@ -581,18 +607,23 @@ def adorn_with_pcnt(
         pcnt_fld = "{}_pcnt".format(f)
         if groupby_flds:
             group_pcnt_fld = "{}_{}_pcnt".format(
-                "_".join([str(x) for x in groupby_flds]), f)
-            df[group_pcnt_fld] = df[f].groupby(
-                **groupby_args).transform(np.sum)
+                "_".join([str(x) for x in groupby_flds]), f
+            )
+            df[group_pcnt_fld] = df[f].groupby(**groupby_args).transform(np.sum)
             df[group_pcnt_fld] = df[f] / df[group_pcnt_fld]
             if sort_fld in df and types.is_numeric_dtype(df[sort_fld]):
                 df = get_sorted_groups(
-                    df, sort_fld=sort_fld, groupby_flds=groupby_flds, ascending=ascending)
+                    df,
+                    sort_fld=sort_fld,
+                    groupby_flds=groupby_flds,
+                    ascending=ascending,
+                )
             else:
                 df = safe_sort(df, sort_fld=groupby_flds, ascending=ascending)
             if cum:
-                df["{}_cum".format(group_pcnt_fld)] = df[group_pcnt_fld].groupby(
-                    **groupby_args).transform(np.cumsum)
+                df["{}_cum".format(group_pcnt_fld)] = (
+                    df[group_pcnt_fld].groupby(**groupby_args).transform(np.cumsum)
+                )
         df[pcnt_fld] = df[f] / df[f].sum()
         if cum:
             df["{}_cum".format(pcnt_fld)] = df[pcnt_fld].cumsum()
@@ -600,10 +631,10 @@ def adorn_with_pcnt(
 
 
 def get_filtered_groups(
-        df: pd.DataFrame,
-        filter_fld: str,
-        filter_func: Callable,
-        groupby_flds: List[str] = None,
+    df: pd.DataFrame,
+    filter_fld: str,
+    filter_func: Callable,
+    groupby_flds: List[str] = None,
 ) -> pd.DataFrame:
     """Filter DataFrame based on a generic function applied to a field in each group.
 
@@ -627,13 +658,13 @@ def get_filtered_groups(
 
 
 def get_binned(
-        sr: pd.Series,
-        bins: [List[float], np.ndarray] = None,
-        bin_pctls: [List[float], np.ndarray] = None,
-        fillna_val: float = None,
-        na_bucket_label: str = "-",
-        right: bool = True,
-        include_lowest: bool = True
+    sr: pd.Series,
+    bins: [List[float], np.ndarray] = None,
+    bin_pctls: [List[float], np.ndarray] = None,
+    fillna_val: float = None,
+    na_bucket_label: str = "-",
+    right: bool = True,
+    include_lowest: bool = True,
 ) -> pd.Series:
     """Given a Series and optional bins, return the Series of binned values.
 
@@ -668,16 +699,19 @@ def get_binned(
             binned_vals = sr.astype("category", ordered=True).values
         else:
             bin_pctls = bin_pctls or (
-                [0.01, 0.5] + list(np.linspace(.1, 0.9, 9)) + [0.95, 0.99])
+                [0.01, 0.5] + list(np.linspace(0.1, 0.9, 9)) + [0.95, 0.99]
+            )
             pctl_vals = sorted(set(sr.quantile(bin_pctls)))
             if sr.max() - sr.min() > 1:
                 pctl_vals = sorted(set([int(x) for x in pctl_vals]))
             bins = [-np.inf] + pctl_vals + [np.inf]
             binned_vals = pd.cut(
-                sr.values, bins=bins, right=right, include_lowest=include_lowest)
+                sr.values, bins=bins, right=right, include_lowest=include_lowest
+            )
     else:
         binned_vals = pd.cut(
-            sr.values, bins=bins, right=right, include_lowest=include_lowest)
+            sr.values, bins=bins, right=right, include_lowest=include_lowest
+        )
 
     if na_bucket_label:
         if binned_vals.isnull().sum():
@@ -685,7 +719,8 @@ def get_binned(
             binned_vals = binned_vals.add_categories([na_bucket_label])
             # Make sure the null bucket is the first one
             binned_vals = binned_vals.reorder_categories(
-                list(binned_vals.categories[-1:]) + list(binned_vals.categories[:-1]))
+                list(binned_vals.categories[-1:]) + list(binned_vals.categories[:-1])
+            )
             # Actually rename the nulls to have the value
             binned_vals[binned_vals.isnull()] = na_bucket_label
     return binned_vals
@@ -695,7 +730,7 @@ def apply_filter_by_agg_query(
     df: pd.DataFrame,
     agg_df: pd.DataFrame,
     agg_ts_query: Dict[str, Callable],
-    verbose: bool = True
+    verbose: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Given a DataFrame with a MultiIndex and another which has the same MultiIndex
     minus the last level, but instead has a MultiIndex column which represents the
@@ -716,29 +751,41 @@ def apply_filter_by_agg_query(
             Dataframes passed to it.
     """
     if verbose:
-        LOGGER.info("Applying agg_ts_query: {} (size={:,.0f})... ".format(
-            agg_ts_query, len(df)), end="", flush=True)
+        LOGGER.info(
+            "Applying agg_ts_query: {} (size={:,.0f})... ".format(
+                agg_ts_query, len(df)
+            ),
+            end="",
+            flush=True,
+        )
     # first apply the filters to the agg_df
     for col_name, query in agg_ts_query.items():
         qdf = agg_df[col_name].query(query)
         if len(qdf):  # pylint: disable=len-as-condition
             if isinstance(qdf.index, pd.MultiIndex):
                 qdf_index = tuple(
-                    [qdf.index.get_level_values(x).tolist()
-                     for x in qdf.index.names])
+                    [qdf.index.get_level_values(x).tolist() for x in qdf.index.names]
+                )
             else:
                 qdf_index = qdf.index
             agg_df = agg_df.loc[qdf_index, :]
-        df = df.loc[tuple([agg_df[col_name].query(query).index.get_level_values(fld).tolist()
-                           for fld in agg_df.index.names] + [slice(None)]), :]
+        df = df.loc[
+            tuple(
+                [
+                    agg_df[col_name].query(query).index.get_level_values(fld).tolist()
+                    for fld in agg_df.index.names
+                ]
+                + [slice(None)]
+            ),
+            :,
+        ]
     if verbose:
         LOGGER.info("done (size={:,.0f}).".format(len(df)), flush=True)
     return df, agg_df
 
 
 def get_merged_interval_mappings(
-    intervals: pd.Interval,
-    boundaries: List[float]
+    intervals: pd.Interval, boundaries: List[float]
 ) -> Dict[pd.Interval, List[Interval]]:
     """Given an iterable of intervals and some boundaries, returns a dictionary which maps the
     old intervals to a new set of merged intervals.
@@ -754,33 +801,37 @@ def get_merged_interval_mappings(
         (Dict[pd.Interval, List[Interval]]) mapping from old interval to list of new intervals.
     """
     intervals = sorted(set(intervals))
-    allowed_boundaries = set([b for interval in intervals for b in [
-                             interval.left, interval.right]])
+    allowed_boundaries = set(
+        [b for interval in intervals for b in [interval.left, interval.right]]
+    )
     finite_boundaries = [b for b in boundaries if b not in [-np.inf, np.inf]]
     boundaries = sorted([-np.inf] + list(finite_boundaries) + [np.inf])
-    assert set(finite_boundaries).issubset(allowed_boundaries), \
-        "boundaries needs to be a subset of {}".format(
-            sorted(allowed_boundaries))
+    assert set(finite_boundaries).issubset(
+        allowed_boundaries
+    ), "boundaries needs to be a subset of {}".format(sorted(allowed_boundaries))
     if not finite_boundaries:
-        new_intervals = [Interval(-np.inf, np.inf, closed='both')]
+        new_intervals = [Interval(-np.inf, np.inf, closed="both")]
         interval_remap_index = [0 for _ in intervals]
     else:
         new_intervals = [
-            Interval(left, boundaries[i + 1], closed='right')
-            for i, left in enumerate(boundaries[:-1])]
+            Interval(left, boundaries[i + 1], closed="right")
+            for i, left in enumerate(boundaries[:-1])
+        ]
         interval_remap_index = np.digitize(
-            [interval.right for interval in intervals], finite_boundaries, right=True)
-    remaps = {b: new_intervals[interval_remap_index[i]]
-              for i, b in enumerate(intervals)}
+            [interval.right for interval in intervals], finite_boundaries, right=True
+        )
+    remaps = {
+        b: new_intervals[interval_remap_index[i]] for i, b in enumerate(intervals)
+    }
     return remaps
 
 
 def get_anomalies(
-        df: pd.DataFrame,
-        field: str,
-        lower_pctl: int = 5,
-        upper_pctl: int = 95,
-        print_stats: bool = True
+    df: pd.DataFrame,
+    field: str,
+    lower_pctl: int = 5,
+    upper_pctl: int = 95,
+    print_stats: bool = True,
 ):
     pctls = []
     lower_pctl_val = np.NaN
@@ -801,26 +852,35 @@ def get_anomalies(
     if not pd.isnull(upper_pctl_val):
         upper_pctl_val = pctl_vals[upper_pctl_val]
     if print_stats:
-        print("{} stats: mean={}, median={}, min={}, max={}".format(
-            *[try_fmt_num(x, lambda x: x) for x in [field,
-                                                    np.mean(df[field]),
-                                                    np.median(df[field]),
-                                                    np.min(df[field]),
-                                                    np.max(df[field])]]))
-    print("Anomalies defined as {} value being outside percentile"
-          " ({:.0f}%, {:.0f}%) = ({:,.4f}, {:,.4f})".format(
-              field, lower_pctl, upper_pctl, lower_pctl_val, upper_pctl_val))
-    dff = df[(
-        (lower_pctl_val is not None) & (df[field] < lower_pctl_val)
-    ) | (
-        (upper_pctl_val is not None) & (df[field] > upper_pctl_val)
-    )]
+        print(
+            "{} stats: mean={}, median={}, min={}, max={}".format(
+                *[
+                    try_fmt_num(x, lambda x: x)
+                    for x in [
+                        field,
+                        np.mean(df[field]),
+                        np.median(df[field]),
+                        np.min(df[field]),
+                        np.max(df[field]),
+                    ]
+                ]
+            )
+        )
+    print(
+        "Anomalies defined as {} value being outside percentile"
+        " ({:.0f}%, {:.0f}%) = ({:,.4f}, {:,.4f})".format(
+            field, lower_pctl, upper_pctl, lower_pctl_val, upper_pctl_val
+        )
+    )
+    dff = df[
+        ((lower_pctl_val is not None) & (df[field] < lower_pctl_val))
+        | ((upper_pctl_val is not None) & (df[field] > upper_pctl_val))
+    ]
     print("%s of %s records were flagged as anomalous" % (len(dff), len(df)))
     return dff
 
 
 class DataFrameFilterByQuery(object):
-
     def __init__(self, query, copy=True):
         self.query = query
         self.copy = copy
@@ -840,7 +900,6 @@ class DataFrameFilterByQuery(object):
 
 
 class DataFrameFilterInVals(object):
-
     def __init__(self, fld, vals, negate=False, copy=True):
         self.fld = fld
         self.vals = set(vals)
@@ -850,10 +909,10 @@ class DataFrameFilterInVals(object):
             sorted_vals = sorted(vals)
         except TypeError:  # not everything is sortable!
             sorted_vals = vals
-        str_vals = str(sorted_vals) if len(
-            sorted_vals) < 100 else get_hash(sorted_vals)
+        str_vals = str(sorted_vals) if len(sorted_vals) < 100 else get_hash(sorted_vals)
         self.__name__ = "DataFrameFilter_{}_{}in_{}".format(
-            fld, "not_" if negate else "", str_vals)
+            fld, "not_" if negate else "", str_vals
+        )
         self.__hash_override__ = get_hash(self.__name__)
 
     def __call__(self, df, **meta):
@@ -872,7 +931,6 @@ class DataFrameFilterInVals(object):
 
 
 class DataFrameFilterRegexp(object):
-
     def __init__(self, fld, regexp, flags=0, negate=False, copy=True):
         self.fld = fld
         self.regexp = regexp
@@ -880,7 +938,8 @@ class DataFrameFilterRegexp(object):
         self.negate = negate
         self.copy = copy
         self.__name__ = "DataFrameFilter_{}_{}matches_{}_flags={}".format(
-            fld, "not_" if negate else "", regexp, flags)
+            fld, "not_" if negate else "", regexp, flags
+        )
         self.__hash_override__ = get_hash(self.__name__)
 
     def __call__(self, df, **meta):
@@ -904,19 +963,21 @@ class SeriesReturnExtractor:
         interval_td,
         min_interval_ratio=0.9,
         max_interval_ratio=1.1,
-        diff_only=False
+        diff_only=False,
     ):
         self._interval_td = pd.to_timedelta(interval_td)
         self._interval_ms = int(self._interval_td.to_timedelta64()) / 1e6
         self._min_interval_td = pd.to_timedelta(
-            self._interval_ms * min_interval_ratio, unit="ms")
+            self._interval_ms * min_interval_ratio, unit="ms"
+        )
         self._max_interval_td = pd.to_timedelta(
-            self._interval_ms * max_interval_ratio, unit="ms")
+            self._interval_ms * max_interval_ratio, unit="ms"
+        )
         self._diff_only = diff_only
 
     def __call__(self, series):
         if series is None or len(series) < 2:
-            return np. NaN
+            return np.NaN
         start_ts, end_ts = series.index[[0, -1]]
         ts_diff = end_ts - start_ts
         if ts_diff < self._min_interval_td or ts_diff > self._max_interval_td:
@@ -929,7 +990,7 @@ class SeriesReturnExtractor:
             return diff
         if start_val:
             return diff / start_val
-        return np. NaN
+        return np.NaN
 
     def __str__(self):
         return (
@@ -938,7 +999,7 @@ class SeriesReturnExtractor:
             f", interval_td={self._interval_td}"
             f", min_interval_td={self._min_interval_td}",
             f", max_interval_td={self._max_interval_td}",
-            ")"
+            ")",
         )
 
     __repr__ = __str__

@@ -10,15 +10,20 @@ from typing import Any, Callable, Optional, Union
 import pandas as pd
 import pandas.api.types as types
 
-
 DT_FMT_NICE = "%Y-%m-%d %H:%M:%S"
 DT_FMT_COMP = "%Y%m%d%H%M%S"
 
 
 def guess_timestamp_unit(ts: int) -> str:
-    return "s" if ts < 9223372036.854775 else (
-        "ms" if ts < 9223372036854.775 else (
-            "us" if ts < 9223372036854775 else "ns"))
+    return (
+        "s"
+        if ts < 9223372036.854775
+        else (
+            "ms"
+            if ts < 9223372036854.775
+            else ("us" if ts < 9223372036854775 else "ns")
+        )
+    )
 
 
 def try_get_datetime(
@@ -105,15 +110,15 @@ def try_fmt_timedelta(
         sign = "-" if secs < 0 else ""
         secs = abs(secs)
         periods = [
-            ('Y', 31536000),  # 60 * 60 * 24 * 365
-            ('M', 2592000),  # 60 * 60 * 24 * 30,
-            ('d', 86400),  # 60 * 60 * 24
-            ('h', 3600),  # 60 * 60
-            ('m', 60),
-            ('s', 1),
+            ("Y", 31536000),  # 60 * 60 * 24 * 365
+            ("M", 2592000),  # 60 * 60 * 24 * 30,
+            ("d", 86400),  # 60 * 60 * 24
+            ("h", 3600),  # 60 * 60
+            ("m", 60),
+            ("s", 1),
         ]
         period_idx = {x[0]: i for i, x in enumerate(periods)}
-        periods = periods[period_idx[max_unit]:]
+        periods = periods[period_idx[max_unit] :]
         strs = []
         for prd_name, prd_secs in periods:
             if secs >= prd_secs:
@@ -149,12 +154,19 @@ def try_fmt_num(
             if pd.isnull(x):
                 return ""
         abs_x = abs(float(x))
-        dps = (0 if abs(x - int(x)) < 1e-20
-               else 4 if abs_x < 1
-               else 3 if abs_x < 10
-               else 2 if abs_x < 100
-               else 1 if abs_x < 1000
-               else 0)
+        dps = (
+            0
+            if abs(x - int(x)) < 1e-20
+            else 4
+            if abs_x < 1
+            else 3
+            if abs_x < 10
+            else 2
+            if abs_x < 100
+            else 1
+            if abs_x < 1000
+            else 0
+        )
         if full_precision or abs_x < 1000:
             return ("{:,.%sf}" % dps).format(x)
         else:
@@ -216,17 +228,21 @@ def try_fmt_interval_from_start_end_timestamps(
     return (
         f"[{try_fmt_datetime(start_timestamp)}"
         f", {try_fmt_datetime(end_timestamp)}]"
-        f"({try_fmt_timedelta(timedelta, full_precision=full_precision)})")
+        f"({try_fmt_timedelta(timedelta, full_precision=full_precision)})"
+    )
 
 
 def try_fmt_timedeltas_from_interval_str(bin_name):
     match = re.match("([([])([0-9]+|[+-]*inf) *, *([0-9]+|[+]*inf)([])])", bin_name)
     if match:
         groups = match.groups()
-        return "".join([
-            groups[0],
-            try_fmt_timedelta(groups[1], full_precision=False),
-            ", ",
-            try_fmt_timedelta(groups[2], full_precision=False),
-            groups[3]])
+        return "".join(
+            [
+                groups[0],
+                try_fmt_timedelta(groups[1], full_precision=False),
+                ", ",
+                try_fmt_timedelta(groups[2], full_precision=False),
+                groups[3],
+            ]
+        )
     return bin_name

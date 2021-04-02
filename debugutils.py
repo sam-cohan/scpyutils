@@ -3,7 +3,6 @@ import sys
 import time
 from typing import Any, Callable
 
-
 from .cacheutils import get_func_name
 from .logutils import setup_logger
 

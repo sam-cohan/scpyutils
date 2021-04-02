@@ -4,11 +4,12 @@ import pathlib
 import random
 import re
 
-import geoip2.database
-import miniupnpc
 import numpy as np
 import pandas as pd
 import requests
+
+import geoip2.database
+import miniupnpc
 
 from . import cacheutils as chu
 from .logutils import setup_logger
@@ -22,7 +23,7 @@ MAXMIND_DB_PATHS = {
     },
     "city": {
         "local_path": os.path.join(MAXMIND_DBS_ROOT_DIR, "GeoLite2-City.mmdb"),
-    }
+    },
 }
 
 
@@ -40,8 +41,7 @@ MM_COUNTRY_DB = load_mmdb("country")
 MM_CITY_DB = load_mmdb("city")
 
 IS_IP_COMPILED_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
-EXTRACT_IP_COMPILED_RE = re.compile(
-    r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}")
+EXTRACT_IP_COMPILED_RE = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}")
 
 
 def get_external_ip_without_external_service():
@@ -83,7 +83,9 @@ def get_external_ip_from_jsonip():
 
 
 def get_external_ip_from_networksecuritytoolkit():
-    return requests.get("http://www.networksecuritytoolkit.org/nst/tools/ip.shtml").text.strip("\n")
+    return requests.get(
+        "http://www.networksecuritytoolkit.org/nst/tools/ip.shtml"
+    ).text.strip("\n")
 
 
 def get_external_ip_from_whatsmyip():
@@ -131,7 +133,8 @@ def get_external_ip(max_attempts=10):
             return ip
         except Exception as e:
             LOGGER.exception(
-                "Failed to get external IP from external service=%s %s", ip_getter, e)
+                "Failed to get external IP from external service=%s %s", ip_getter, e
+            )
             attempt += 1
     raise Exception("Unable to get external IP")
 
@@ -174,6 +177,9 @@ def get_ip_city_country(ip):
 
 def clear_iputils_caches():
     for func in [is_valid_ip, get_ip_country, get_ip_city, get_ip_city_country]:
-        print("{} cache_size is {:,.0f}... clearing it".format(
-            func.__name__, len(func._cached_results_)))
+        print(
+            "{} cache_size is {:,.0f}... clearing it".format(
+                func.__name__, len(func._cached_results_)
+            )
+        )
         func._cached_results_.clear()

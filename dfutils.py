@@ -2,15 +2,16 @@
 This module has DataFrame utilities which are sometimes specific
 to dealing with trading data.
 """
-from collections import defaultdict
 import datetime
 import re
 import traceback
+from collections import defaultdict
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from tqdm.notebook import tqdm_notebook
+
 from .logutils import setup_logger
 
 LOGGER = setup_logger(__name__)
@@ -27,10 +28,10 @@ def extract_sampled_df(
 
 class FieldGuesser:
     """Class for guessing common field names from a list of fields."""
+
     @staticmethod
     def guess_fld(flds: List, pattern: str) -> Optional[str]:
-        matches = [c for c in flds
-                   if re.search(f"{pattern}", str(c), re.IGNORECASE)]
+        matches = [c for c in flds if re.search(f"{pattern}", str(c), re.IGNORECASE)]
         if not matches:
             return None
         if len(matches) == 1:
@@ -72,7 +73,7 @@ class SideConverter:
         away_asset: str,
         symbol_fld: Optional[str] = None,
         side_fld: Optional[str] = None,
-        logger: Optional[Callable] = None
+        logger: Optional[Callable] = None,
     ):
         self.away_asset = away_asset.upper()
         self.side_fld = side_fld
@@ -104,7 +105,8 @@ class SideConverter:
                     raise Exception("unknown side={side} for record={x}")
             else:
                 self.log(
-                    f"away_asset={self.away_asset} not part of instrument {symbol}")
+                    f"away_asset={self.away_asset} not part of instrument {symbol}"
+                )
         return side
 
     def __str__(self):
@@ -112,17 +114,18 @@ class SideConverter:
             f"GetRealSide(away_asset={self.away_asset}"
             f", symbol_fld={self.symbol_fld}"
             f", side_fld={self.side_fld}"
-            ")")
+            ")"
+        )
 
 
 def unify_side(
-        df: pd.DataFrame,
-        away_asset: str,
-        symbol_fld: Optional[str] = None,
-        side_fld: Optional[str] = None,
-        amount_fld: Optional[str] = None,
-        price_fld: str = "price",
-        logger: Optional[Callable] = None,
+    df: pd.DataFrame,
+    away_asset: str,
+    symbol_fld: Optional[str] = None,
+    side_fld: Optional[str] = None,
+    amount_fld: Optional[str] = None,
+    price_fld: str = "price",
+    logger: Optional[Callable] = None,
 ) -> pd.DataFrame:
     """Given a DataFrame, and a risky asset unify the side, price and amount fields.
 
@@ -145,8 +148,7 @@ def unify_side(
     if price_fld is None:
         price_fld = FieldGuesser.guess_price_fld(list(df.columns))
     if side_fld not in df or symbol_fld not in df:
-        print(
-            f"WARNING: side_fld={side_fld} or symbol_fld={symbol_fld} missing.")
+        print(f"WARNING: side_fld={side_fld} or symbol_fld={symbol_fld} missing.")
         return df
     backup_side_fld = f"___{side_fld}"
     if backup_side_fld not in df:
@@ -158,16 +160,23 @@ def unify_side(
             away_asset=away_asset,
             symbol_fld=symbol_fld,
             side_fld=side_fld,
-            logger=logger
-        ), axis=1)
-    unequal_sides_idx = (df[side_fld] != df[backup_side_fld])
+            logger=logger,
+        ),
+        axis=1,
+    )
+    unequal_sides_idx = df[side_fld] != df[backup_side_fld]
     backup_symbol_fld = f"___{symbol_fld}"
     if backup_symbol_fld not in df:
         df[backup_symbol_fld] = df[symbol_fld]
     else:
         df[symbol_fld] = df[backup_symbol_fld]
-    df.loc[unequal_sides_idx, symbol_fld] = df.loc[
-        unequal_sides_idx, symbol_fld].astype(str).str.upper().str.replace("/", "").str.replace("([^/]+)_([^/]+)", r"\2_\1")
+    df.loc[unequal_sides_idx, symbol_fld] = (
+        df.loc[unequal_sides_idx, symbol_fld]
+        .astype(str)
+        .str.upper()
+        .str.replace("/", "")
+        .str.replace("([^/]+)_([^/]+)", r"\2_\1")
+    )
     if amount_fld in df and price_fld in df:
         backup_amount_fld = f"___{amount_fld}"
         backup_price_fld = f"___{price_fld}"
@@ -179,16 +188,14 @@ def unify_side(
             df[backup_price_fld] = df[price_fld]
         else:
             df[price_fld] = df[backup_price_fld]
-        df.loc[unequal_sides_idx, amount_fld] = \
-            df.loc[unequal_sides_idx, amount_fld] * \
-            df.loc[unequal_sides_idx, price_fld]
-        df.loc[unequal_sides_idx, price_fld] = 1 / \
-            df.loc[unequal_sides_idx, price_fld]
+        df.loc[unequal_sides_idx, amount_fld] = (
+            df.loc[unequal_sides_idx, amount_fld] * df.loc[unequal_sides_idx, price_fld]
+        )
+        df.loc[unequal_sides_idx, price_fld] = 1 / df.loc[unequal_sides_idx, price_fld]
     return df
 
 
 class DfConverter:
-
     def __init__(
         self,
     ):
@@ -236,7 +243,7 @@ class DfConverter:
         self,
         key: str,
     ):
-        key_split = key.split('__')
+        key_split = key.split("__")
         for i, elt in enumerate(key_split):
             if i < len(self.valid_keys_lists):
                 self.valid_keys_lists[i].add(elt)
@@ -262,8 +269,11 @@ class DfConverter:
                 if not isinstance(v, dict):
                     this_d[this_key] = v
                 else:
-                    this_d.update(self.flatten_reduced_dict(
-                        v, counter=counter + 1, pre_key=this_key))
+                    this_d.update(
+                        self.flatten_reduced_dict(
+                            v, counter=counter + 1, pre_key=this_key
+                        )
+                    )
             return this_d
         return d
 
@@ -303,8 +313,7 @@ class DfConverter:
             return "(" + "|".join(l) + ")"
 
         match_regex = get_regex(match_regex_list) or ".*"
-        self.compiled_filter = re.compile(
-            match_regex) if match_regex != '.*' else None
+        self.compiled_filter = re.compile(match_regex) if match_regex != ".*" else None
         list_of_records = [
             {
                 fk: fv
@@ -312,17 +321,21 @@ class DfConverter:
                 if self.is_valid_key(fk)
                 and not self.is_complex_col(fk, fv, drop_complex_flds)
             }
-            for i, o in enumerate(tqdm_notebook(list_of_records, desc="Flattening sim_res into df"))
+            for i, o in enumerate(
+                tqdm_notebook(list_of_records, desc="Flattening sim_res into df")
+            )
             if self.is_valid_period(i, sim_iteration_frq)
         ]
         if prevent_int_overflow:
             min_int = -(2 ** 63)
             max_int = 2 ** 64 - 1
             list_of_records = [
-                {k: (
-                    str(v) if not (min_int <= v <= max_int) else v
-                ) if pd.api.types.is_number(v) else v
-                    for k, v in rec.items()}
+                {
+                    k: (str(v) if not (min_int <= v <= max_int) else v)
+                    if pd.api.types.is_number(v)
+                    else v
+                    for k, v in rec.items()
+                }
                 for rec in list_of_records
                 if rec
             ]
@@ -406,22 +419,26 @@ class DfConverter:
         """
         # convert amount fields from big integer to float
         amount_flds = [
-            c for c in df
+            c
+            for c in df
             if re.search(
                 "nav|pnl|price[s]?|spread|(im)?balance|best_bid|best_ask|best_quotes|volume|amount|fee__cost|funding_rate",
-                c, re.IGNORECASE
-            ) and not re.search(
+                c,
+                re.IGNORECASE,
+            )
+            and not re.search(
                 "(timestamp|coeff|weight|drift"
                 "|drift_spread|order_book_imbalance(_spread)?"
-                ")$", c, re.IGNORECASE
+                ")$",
+                c,
+                re.IGNORECASE,
             )
         ]
         for fld in amount_flds:
             if pd.api.types.is_numeric_dtype(df[fld]):
-                df[fld] /= 10**12
+                df[fld] /= 10 ** 12
         # convert all timestamp fields from ms from epoch to datetime
-        ts_flds = sorted(
-            [c for c in df if re.search("timestamp$", c, re.IGNORECASE)])
+        ts_flds = sorted([c for c in df if re.search("timestamp$", c, re.IGNORECASE)])
         for fld in ts_flds:
             try:
                 df[fld].replace(0, np.NaN, inplace=True)
@@ -433,8 +450,7 @@ class DfConverter:
         elif "timestamp" in df:
             df = df.set_index("timestamp")
         elif ts_flds:
-            df = df.rename(columns={ts_flds[0]: "timestamp"}).set_index(
-                "timestamp")
+            df = df.rename(columns={ts_flds[0]: "timestamp"}).set_index("timestamp")
 
         if away_asset:
             df = unify_side(df, away_asset=away_asset)
@@ -463,11 +479,11 @@ def get_df_with_col_types(
         (pd.DataFrame) with timeseries of results.
     """
     df = pd.DataFrame(
-        [x for x in list_of_lists if x],
-        columns=[x[0] for x in col_types])
+        [x for x in list_of_lists if x], columns=[x[0] for x in col_types]
+    )
     for col_name, col_type in col_types:
         if col_type == "bigint":
-            df[col_name] /= 10**12
+            df[col_name] /= 10 ** 12
         else:
             df[col_name] = df[col_name].astype(col_type)
     if "timestamp" in df:
@@ -522,8 +538,9 @@ def is_df_col_plottable(
     """
     info = ""
     try:
-        is_plottable = bool(isinstance(df, pd.DataFrame) and (
-            col in df) and df[col].notnull().sum())
+        is_plottable = bool(
+            isinstance(df, pd.DataFrame) and (col in df) and df[col].notnull().sum()
+        )
     except Exception as e:
         is_plottable = False
         info = f"{traceback.format_exc()} -- {e}"
@@ -532,7 +549,8 @@ def is_df_col_plottable(
         if col in df:
             occurence = df[col].notnull().sum()
         warn_logger(
-            f"column={col} is not plottable: -- {info} -- {isinstance(df, pd.DataFrame)} -- {col in df} -- {occurence} -- {len(df)}")
+            f"column={col} is not plottable: -- {info} -- {isinstance(df, pd.DataFrame)} -- {col in df} -- {occurence} -- {len(df)}"
+        )
     return is_plottable
 
 
@@ -548,10 +566,7 @@ def is_non_empty_df(df: Optional[pd.DataFrame]) -> bool:
     return bool(isinstance(df, pd.DataFrame) and len(df))
 
 
-def try_apply_query(
-    query_str: str,
-    df: pd.DataFrame
-) -> Optional[pd.DataFrame]:
+def try_apply_query(query_str: str, df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """Tries to Apply a query to a DataFrame and returns null if there are any errors.
 
     Arguments:
@@ -580,21 +595,19 @@ class RecordListMerger:
 
     def consume(self, rec):
         if rec:
-            _ = [self._data[k].append(v)
-                 for k, v in rec.items()
-                 if isinstance(v, list) and re.match(self._match_regex, k, re.IGNORECASE)]
+            _ = [
+                self._data[k].append(v)
+                for k, v in rec.items()
+                if isinstance(v, list) and re.match(self._match_regex, k, re.IGNORECASE)
+            ]
         return self
 
     def get_merged_columns(self, as_df=True):
-        res = {
-            k: [x for l in v for x in l]
-            for k, v in self._data.items()
-        }
+        res = {k: [x for l in v for x in l] for k, v in self._data.items()}
         if not as_df:
             return res
         res_dfs = {}
         for col_name, data in res.items():
-            kwargs = dict(
-                columns=self._col_names) if self._col_names else dict()
+            kwargs = dict(columns=self._col_names) if self._col_names else dict()
             res_dfs[col_name] = pd.DataFrame(data, **kwargs)
         return res_dfs

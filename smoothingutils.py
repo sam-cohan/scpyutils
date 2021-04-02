@@ -86,31 +86,30 @@ class StreamExponentialSmoother:
             self._halflife = halflife
             self._tau = self._halflife / LN_2
             self._alpha = 1 - math.exp(-unit_td / self._tau)
-            self._span = (2. / self._alpha) - 1
+            self._span = (2.0 / self._alpha) - 1
         elif tau:
             assert (not alpha) and (not halflife) and (not span)
             assert tau > 0
             self._tau = tau
             self._halflife = self._tau * LN_2
             self._alpha = 1 - math.exp(-unit_td / self._tau)
-            self._span = (2. / self._alpha) - 1
+            self._span = (2.0 / self._alpha) - 1
         elif alpha:
             assert (not tau) and (not halflife) and (not span)
             assert 0 < alpha < 1
             self._alpha = alpha
             self._tau = unit_td / math.log(1 / (1 - self._alpha))
             self._halflife = self._tau * LN_2
-            self._span = (2. / self._alpha) - 1
+            self._span = (2.0 / self._alpha) - 1
         elif span:
             assert (not tau) and (not halflife) and (not alpha)
             assert span >= 1
             self._span = span
-            self._alpha = 2. / (self._span + 1)
+            self._alpha = 2.0 / (self._span + 1)
             self._tau = unit_td / math.log(1 / (1 - self._alpha))
             self._halflife = self._tau * LN_2
         else:
-            raise Exception(
-                "Provide exactly one of alpha, halflife, tau, or span.")
+            raise Exception("Provide exactly one of alpha, halflife, tau, or span.")
         self.warn_if_time_rewinds = warn_if_time_rewinds
         self.raise_if_time_rewinds = raise_if_time_rewinds
         self._level = None
@@ -139,16 +138,16 @@ class StreamExponentialSmoother:
             td = None
             if ts is None:
                 if self._last_ts is not None:
-                    raise Exception(
-                        "Cannot stop giving timestamps all of a sudden!")
+                    raise Exception("Cannot stop giving timestamps all of a sudden!")
                 td = 1 + self._nans_in_a_row
             else:  # ts is not None
                 if self._last_ts is None:
-                    raise Exception(
-                        "Cannot start giving timestamps all of a sudden!")
+                    raise Exception("Cannot start giving timestamps all of a sudden!")
                 # last_ts is not None
                 if ts < self._last_ts:
-                    error_msg = f"Stream going back in time: ts={ts} < last_ts={self._last_ts}"
+                    error_msg = (
+                        f"Stream going back in time: ts={ts} < last_ts={self._last_ts}"
+                    )
                     if self.warn_if_time_rewinds:
                         LOGGER.warning(error_msg)
                     if self.raise_if_time_rewinds:
@@ -195,14 +194,16 @@ class StreamExponentialSmoother:
         self._num_points = num_points
 
     def __str__(self):
-        return ("StreamExponentialSmoother("
-                f"alpha={self.get_alpha(self.unit_td):,.4f}"
-                f", halflife={self.halflife:,.4f}"
-                f", num_points={self._num_points}"
-                f", level={self.level}"
-                f", last_ts={self.last_ts}"
-                f", unit_td={self.unit_td}"
-                ")")
+        return (
+            "StreamExponentialSmoother("
+            f"alpha={self.get_alpha(self.unit_td):,.4f}"
+            f", halflife={self.halflife:,.4f}"
+            f", num_points={self._num_points}"
+            f", level={self.level}"
+            f", last_ts={self.last_ts}"
+            f", unit_td={self.unit_td}"
+            ")"
+        )
 
     __repr__ = __str__
 
@@ -319,8 +320,7 @@ class StreamDoubleExponentialSmoother:
             td = None
             if ts is None:
                 if self._last_ts is not None:
-                    raise Exception(
-                        "Cannot stop giving timestamps all of a sudden!")
+                    raise Exception("Cannot stop giving timestamps all of a sudden!")
                 td = 1 + self._nans_in_a_row
                 # Make sure we have at least as many points as the halflife before we
                 # start double exponentially smoothing. (Assumes that the points
@@ -329,11 +329,12 @@ class StreamDoubleExponentialSmoother:
                     self._init_mode = False
             else:  # ts is not None
                 if self._last_ts is None:
-                    raise Exception(
-                        "Cannot start giving timestamps all of a sudden!")
+                    raise Exception("Cannot start giving timestamps all of a sudden!")
                 # last_ts is not None
                 if ts < self._last_ts:
-                    error_msg = f"Stream going back in time: ts={ts} < last_ts={self._last_ts}"
+                    error_msg = (
+                        f"Stream going back in time: ts={ts} < last_ts={self._last_ts}"
+                    )
                     if self.warn_if_time_rewinds:
                         LOGGER.warning(error_msg)
                     if self.raise_if_time_rewinds:
@@ -345,7 +346,9 @@ class StreamDoubleExponentialSmoother:
                     time_since_first = ts - self._first_ts
                     # Make sure we have at least 5 points and are time_constant from start
                     # before we start double exponential smoothing.
-                    if (self._num_points + 1) >= 5 and time_since_first > self._level_halflife:
+                    if (
+                        self._num_points + 1
+                    ) >= 5 and time_since_first > self._level_halflife:
                         self._init_mode = False
 
             alpha = self.get_alpha(td)
@@ -355,10 +358,8 @@ class StreamDoubleExponentialSmoother:
             if self._init_mode:
                 self._level = alpha * datum + (1 - alpha) * self._level
             else:
-                _level = alpha * datum + \
-                    (1 - alpha) * (self._level + self._trend)
-                self._trend = beta * (_level - self._level) + \
-                    (1 - beta) * self._trend
+                _level = alpha * datum + (1 - alpha) * (self._level + self._trend)
+                self._trend = beta * (_level - self._level) + (1 - beta) * self._trend
                 self._level = _level
 
         self._num_points += 1
@@ -372,7 +373,9 @@ class StreamDoubleExponentialSmoother:
 
     def get_forecast_for_time(self, ts):
         if ts < self._last_ts:
-            warn_msg = f"Asking for forecast back in time: ts={ts} < last_ts={self._last_ts}"
+            warn_msg = (
+                f"Asking for forecast back in time: ts={ts} < last_ts={self._last_ts}"
+            )
             LOGGER.warning(warn_msg)
             if self.raise_if_time_rewinds:
                 raise Exception(warn_msg)
@@ -418,17 +421,19 @@ class StreamDoubleExponentialSmoother:
         return self._unit_td
 
     def __str__(self):
-        return ("StreamDoubleExponentialSmoother("
-                f"alpha={self.get_alpha(self.unit_td):,.4f}"
-                f", beta={self.get_beta(self.unit_td):,.4f}"
-                f", level_halflife={self.level_halflife:,.4f}"
-                f", trend_halflife={self.trend_halflife:,.4f}"
-                f", num_points={self._num_points}"
-                f", level={self.level}"
-                f", trend={self.trend}"
-                f", last_ts={self.last_ts}"
-                f", unit_td={self.unit_td}"
-                ")")
+        return (
+            "StreamDoubleExponentialSmoother("
+            f"alpha={self.get_alpha(self.unit_td):,.4f}"
+            f", beta={self.get_beta(self.unit_td):,.4f}"
+            f", level_halflife={self.level_halflife:,.4f}"
+            f", trend_halflife={self.trend_halflife:,.4f}"
+            f", num_points={self._num_points}"
+            f", level={self.level}"
+            f", trend={self.trend}"
+            f", last_ts={self.last_ts}"
+            f", unit_td={self.unit_td}"
+            ")"
+        )
 
     __repr__ = __str__
 

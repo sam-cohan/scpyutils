@@ -25,6 +25,11 @@ class RunInThreadWithTimeout:
             _res = _pool.apply_async(_target).get(timeout=self._timeout)
         except mpc_ctx.TimeoutError as e:
             LOGGER.error(
-                "TimeoutError trying to run %s(*%s, **%s)... %s", self._func, args, kwargs, e)
+                "TimeoutError trying to run %s(*%s, **%s)... %s",
+                self._func,
+                args,
+                kwargs,
+                e,
+            )
             raise e
         return _res

@@ -9,12 +9,12 @@ class PathMissingException(Exception):
 def read_dict(obj, path, err=False):
     if path:
         try:
-            return read_dict(obj[path[0]],
-                             path[1:])
+            return read_dict(obj[path[0]], path[1:])
         except:
             if err:
                 raise Exception(
-                    'Could not identify path %s in dictionary %s' % (path, obj))
+                    "Could not identify path %s in dictionary %s" % (path, obj)
+                )
             return {}
     else:
         return obj
@@ -32,13 +32,16 @@ def update_paths(
     update_if_exists: bool = True,
     raise_if_missing: bool = False,
 ):
-    _ = [update_path(
-        dct=dct,
-        path=path,
-        val=val,
-        update_if_exists=update_if_exists,
-        raise_if_missing=raise_if_missing)
-        for path, val in paths.items()]
+    _ = [
+        update_path(
+            dct=dct,
+            path=path,
+            val=val,
+            update_if_exists=update_if_exists,
+            raise_if_missing=raise_if_missing,
+        )
+        for path, val in paths.items()
+    ]
 
 
 def update_path(
@@ -46,7 +49,7 @@ def update_path(
     path: str,
     val: Any,
     update_if_exists: bool = True,
-    raise_if_missing: bool = False
+    raise_if_missing: bool = False,
 ):
     path_parts = path.split("~")
     ensure_entry(
@@ -54,7 +57,8 @@ def update_path(
         path_parts=path_parts,
         val=val,
         update_if_exists=update_if_exists,
-        raise_if_missing=raise_if_missing)
+        raise_if_missing=raise_if_missing,
+    )
 
 
 def ensure_entry(
@@ -95,7 +99,8 @@ def ensure_entry(
             path_parts=next_path_parts,
             val=val,
             update_if_exists=update_if_exists,
-            raise_if_missing=raise_if_missing)
+            raise_if_missing=raise_if_missing,
+        )
     else:
         if fld not in dct:
             if raise_if_missing:
@@ -125,18 +130,13 @@ def soft_update(d1, d2, raise_error=False):
         undesired_keys = set(d2) - set(d1)
         if undesired_keys:
             raise Exception(
-                "The following keys should not be present: %s" % undesired_keys)
+                "The following keys should not be present: %s" % undesired_keys
+            )
     return {k: d2.get(k, d1[k]) for k in d1}
 
 
-def diff_rec(
-    left,
-    right,
-    ignore_keys=None,
-    comp_mode='dp',
-    precision=6
-):
-    '''
+def diff_rec(left, right, ignore_keys=None, comp_mode="dp", precision=6):
+    """
     Given two generic structures left and right, this will return
     a map showing their diff. It uses recursive drill down, so do
     not use on structures which have big depth!
@@ -156,13 +156,12 @@ def diff_rec(
         if comp_mode='sf' then significant figures to round to before comparison
         if comp_mode='dp' then decimal places to round to before comparison
         if comp_mode='pc' then percentage change required to trigger diff
-    '''
+    """
     if ignore_keys is None:
         ignore_keys = {}
     ignore_keys = set(ignore_keys)
 
-    def diff_rec_(left,
-                  right):
+    def diff_rec_(left, right):
         diffs = {}
         left_is_dict = isinstance(left, dict)
         right_is_dict = isinstance(right, dict)
@@ -176,26 +175,26 @@ def diff_rec(
             for key in shared_keys:
                 res = diff_rec_(left[key], right[key])
                 if res:
-                    if 'ValDiff' not in map_diffs:
-                        map_diffs['ValDiff'] = {}
-                    map_diffs['ValDiff'][key] = res
+                    if "ValDiff" not in map_diffs:
+                        map_diffs["ValDiff"] = {}
+                    map_diffs["ValDiff"][key] = res
             if only_in_left_keys:
                 tmp_map = {}
                 for k in only_in_left_keys:
                     tmp_map[k] = left[k]
-                map_diffs['OnlyInLeft'] = tmp_map
+                map_diffs["OnlyInLeft"] = tmp_map
             if only_in_right_keys:
                 tmp_map = {}
                 for k in only_in_right_keys:
                     tmp_map[k] = right[k]
-                map_diffs['OnlyInRight'] = tmp_map
+                map_diffs["OnlyInRight"] = tmp_map
             if map_diffs:
                 diffs = map_diffs
         elif not left_is_dict and not right_is_dict:
-            left_is_iterable = hasattr(
-                left, '__iter__') and not isinstance(left, str)
-            right_is_iterable = hasattr(
-                right, '__iter__') and not isinstance(right, str)
+            left_is_iterable = hasattr(left, "__iter__") and not isinstance(left, str)
+            right_is_iterable = hasattr(right, "__iter__") and not isinstance(
+                right, str
+            )
             if left_is_iterable and right_is_iterable:
                 iterable_diffs = {}
                 idx = -1
@@ -208,33 +207,34 @@ def diff_rec(
                     diffs = iterable_diffs
             elif not left_is_iterable and not right_is_iterable:
                 if left != right:
-                    if comp_mode == 'sf':
+                    if comp_mode == "sf":
                         try:
-                            left_num = ('%%.%dg' % (int(precision))) % (left)
-                            right_num = ('%%.%dg' % (int(precision))) % (right)
+                            left_num = ("%%.%dg" % (int(precision))) % (left)
+                            right_num = ("%%.%dg" % (int(precision))) % (right)
                             if left_num != right_num:
                                 diffs = (left, right, right - left)
                         except:
                             diffs = (left, right)
-                    elif comp_mode == 'dp':
+                    elif comp_mode == "dp":
                         try:
-                            left_num = ('{0:.%sf}' %
-                                        (int(precision))).format(float(left))
-                            right_num = ('{0:.%sf}' %
-                                         (int(precision))).format(float(right))
+                            left_num = ("{0:.%sf}" % (int(precision))).format(
+                                float(left)
+                            )
+                            right_num = ("{0:.%sf}" % (int(precision))).format(
+                                float(right)
+                            )
                             if left_num != right_num:
                                 diffs = (left, right, right - left)
                         except:
                             diffs = (left, right)
-                    elif comp_mode == 'pc':
+                    elif comp_mode == "pc":
                         try:
                             if abs(right - left) / float(abs(left)) >= precision:
                                 diffs = (left, right, right - left)
                         except:
                             diffs = (left, right)
                     else:
-                        raise Exception(
-                            "comp_mode='%s' not supported" % (comp_mode))
+                        raise Exception("comp_mode='%s' not supported" % (comp_mode))
             else:
                 diffs = (left, right)
         else:
@@ -253,9 +253,9 @@ def get_first_item(d, l, f):
 
 def dict_product(d):
     keys = list(d.keys())
-    return [{x[0]: x[1]
-             for x in zip(keys, item)}
-            for item in list(product(*d.values()))]
+    return [
+        {x[0]: x[1] for x in zip(keys, item)} for item in list(product(*d.values()))
+    ]
 
 
 def flatten_dict(d, pre_key=""):

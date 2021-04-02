@@ -2,10 +2,7 @@ import psutil
 
 
 def get_vitals():
-    return {
-        "memory": get_memory_vitals(),
-        "cpu": get_cpu_vitals()
-    }
+    return {"memory": get_memory_vitals(), "cpu": get_cpu_vitals()}
 
 
 def get_memory_vitals():
@@ -20,12 +17,10 @@ def get_memory_vitals():
             "free",
             "active",
             "inactive",
-            "wired"
+            "wired",
         ]
     }
 
 
 def get_cpu_vitals():
-    return {
-        "percent": psutil.cpu_percent()
-    }
+    return {"percent": psutil.cpu_percent()}

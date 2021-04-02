@@ -17,7 +17,7 @@ def weighted_percentile(vals, percentiles, weights=None, vals_sorted=False):
     if weights is None:
         return np.percentile(vals, percentiles)
     vals = np.array(vals)
-    quantiles = np.array(percentiles) / 100.
+    quantiles = np.array(percentiles) / 100.0
     weights = np.array(weights)
 
     if not vals_sorted:
@@ -45,16 +45,18 @@ def get_pctl_range_func(lower_pctl, upper_pctl):
         upper_pctl (int): int between upper_pctl and 99 indicating the upper
             percentile score.
     """
+
     def pctl_range_func(x):
         if len(x) == 0 or np.all(np.isnan(x)):  # pylint: disable=len-as-condition
             return np.NaN
         pctl_vals = np.nanpercentile(x, [lower_pctl, upper_pctl])
         return pctl_vals[1] - pctl_vals[0]
 
-    pctl_range_func.__name__ = "pctl_range_%02.0f_%02.0f" % (
-        lower_pctl, upper_pctl)
-    pctl_range_func.__doc__ = "Returns the difference between %02.0f and %02.0f percentile values." % (
-        upper_pctl, lower_pctl)
+    pctl_range_func.__name__ = "pctl_range_%02.0f_%02.0f" % (lower_pctl, upper_pctl)
+    pctl_range_func.__doc__ = (
+        "Returns the difference between %02.0f and %02.0f percentile values."
+        % (upper_pctl, lower_pctl)
+    )
     return pctl_range_func
 
 
@@ -82,10 +84,10 @@ def get_pctl_func(pctl, drop_zeros=False):
             return np.NaN
         return np.percentile(x, pctl)
 
-    pctl_func.__name__ = "{}pctl_{:02.0f}".format(
-        "nz_" if drop_zeros else "", pctl)
+    pctl_func.__name__ = "{}pctl_{:02.0f}".format("nz_" if drop_zeros else "", pctl)
     pctl_func.__doc__ = "Returns the {}{:02.0f}-th percentile".format(
-        "non-zero " if drop_zeros else "", pctl)
+        "non-zero " if drop_zeros else "", pctl
+    )
 
     return pctl_func
 
@@ -133,16 +135,21 @@ def get_anomalous_prob(x_pos, n_trial, non_anomalous_interval):
     # use hypothesis that n_pos/n_trial is greater than the interval bounds
     alternative = "less"
     if (float(x_pos) / n_trial) > 0.5:
-        alternative = "greater"  # use hypothesis that n_pos/n_trial is less than interval bounds
+        alternative = (
+            "greater"  # use hypothesis that n_pos/n_trial is less than interval bounds
+        )
     return 1 - abs(
         stats.binom_test(
             x=x_pos, n=n_trial, p=non_anomalous_interval[0], alternative=alternative
-        ) - stats.binom_test(
-            x=x_pos, n=n_trial, p=non_anomalous_interval[1], alternative=alternative))
+        )
+        - stats.binom_test(
+            x=x_pos, n=n_trial, p=non_anomalous_interval[1], alternative=alternative
+        )
+    )
 
 
 def get_binomial_conf_interval(x_pos, n_tot, conf=0.95):
-    """ Returns the Agresti-Couli Interval ([lower-bound upper-bound]).
+    """Returns the Agresti-Couli Interval ([lower-bound upper-bound]).
     See http://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Agresti-Coull_Interval A
     good discussion of the various confidence interval formulae is in this paper:
     http://projecteuclid.org/DPubS/Repository/1.0/Disseminate?view=body&id=pdf_1&handle=euclid.ss/1009213286;
@@ -159,11 +166,10 @@ def get_binomial_conf_interval(x_pos, n_tot, conf=0.95):
     """
     from scipy.stats import norm
 
-    assert x_pos <= n_tot, "cannot have x_pos={} > n_tot={}".format(
-        x_pos, n_tot)
+    assert x_pos <= n_tot, "cannot have x_pos={} > n_tot={}".format(x_pos, n_tot)
     alpha = 1 - conf
     z = norm.ppf(1 - alpha / 2)
-    nt = n_tot + z**2  # n_tilde in the formula
-    pt = (x_pos + z**2 / 2) / nt  # p_tilde in the formula
+    nt = n_tot + z ** 2  # n_tilde in the formula
+    pt = (x_pos + z ** 2 / 2) / nt  # p_tilde in the formula
     hw = z * np.sqrt(pt * (1 - pt) / nt)
     return (pt - hw), (pt + hw)

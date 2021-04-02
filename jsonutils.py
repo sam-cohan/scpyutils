@@ -1,8 +1,9 @@
 import collections
-from decimal import Decimal
 import json
+from decimal import Decimal
 
 import pandas as pd
+
 import simplejson
 
 
@@ -23,7 +24,6 @@ def json_default(obj):
 
 
 class DefaultJSONEncoder(json.JSONEncoder):
-
     def default(self, obj):
         try:
             return json_default(obj)
@@ -36,30 +36,25 @@ def stringify(obj):
     if isinstance(obj, list):
         return [stringify(x) for x in obj]
     elif isinstance(obj, dict):
-        return {
-            str(k): stringify(v)
-            for k, v in obj.items()}
+        return {str(k): stringify(v) for k, v in obj.items()}
     return obj
 
 
 def json_dumps(obj, indent=4, outfile=None, encode=False):
     if outfile:
-        return simplejson.dump(stringify(obj),
-                               outfile,
-                               default=json_default)
+        return simplejson.dump(stringify(obj), outfile, default=json_default)
     else:
-        val = simplejson.dumps(stringify(obj),
-                               default=json_default,
-                               indent=indent,
-                               sort_keys=True)
+        val = simplejson.dumps(
+            stringify(obj), default=json_default, indent=indent, sort_keys=True
+        )
         if encode:
-            return val.encode('ascii')
+            return val.encode("ascii")
         return val
 
 
 def json_loads(obj, decode=True):
     if decode:
-        return simplejson.loads(obj.decode('utf-8'))
+        return simplejson.loads(obj.decode("utf-8"))
     else:
         return simplejson.loads(obj)
 

@@ -1,9 +1,9 @@
+import copy
 import hashlib
 import inspect
-import copy
 
 
-class VersionManager():
+class VersionManager:
     _versions = {}
 
     def get_class_version(self, inst):
@@ -17,10 +17,13 @@ class VersionManager():
 
     @staticmethod
     def get_source(inst):
-        return '\n'.join(
-            [''.join(inspect.getsourcelines(f[1])[0])
-                for f in inspect.getmembers(inst, predicate=inspect.ismethod)]
+        return "\n".join(
+            [
+                "".join(inspect.getsourcelines(f[1])[0])
+                for f in inspect.getmembers(inst, predicate=inspect.ismethod)
+            ]
         )
+
 
 VERSION_MANAGER = VersionManager()
 
@@ -46,6 +49,7 @@ def _make_hash(obj, debug=False):
         except:
             if debug:
                 import pickle
+
                 pickle.dump(obj, open("deepcopy_failure.p", "wb"))
             raise
         nitems = sorted(new_o.items())
@@ -69,4 +73,4 @@ def make_hash(params):
     :param params: dict - a dictionary
     :return: str - calculated hash id of params
     """
-    return hashlib.sha1(str(_make_hash(params)).encode('utf-8')).hexdigest()
+    return hashlib.sha1(str(_make_hash(params)).encode("utf-8")).hexdigest()
