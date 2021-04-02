@@ -644,33 +644,6 @@ def memorize(  # noqa=C901
     return memorize_
 
 
-def memorize_with_hashable_args(func):
-    """Decorator for fast caching of functions which have hashable args.
-    Note that it will convert np.NaN to None for caching to avoid this common
-    case causing a cache miss.
-    """
-
-    _cached_results_ = {}
-    hash_override = getattr(func, "__hash_override__", None)
-    if hash_override is None:
-        hash_override = get_hash(func)
-
-    @wraps(func)
-    def memorized(*args):
-        try:
-            lookup_args = tuple(x if pd.notnull(x) else None for x in args)
-            res = _cached_results_[lookup_args]
-        except KeyError:
-            res = func(*args)
-            _cached_results_[lookup_args] = res
-        return res
-
-    memorized._cached_results_ = _cached_results_
-    memorized.__hash_override__ = hash_override
-
-    return memorized
-
-
 def memoize(func):
     """Decorator for caching results of generic function in memory."""
     _cached_results_ = {}
