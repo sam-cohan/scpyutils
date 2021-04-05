@@ -1,3 +1,8 @@
+"""
+Utilities useful for data munging with pandas.
+
+Author: Sam Cohan
+"""
 import datetime
 import math
 import re
@@ -10,9 +15,9 @@ import pandas as pd
 import pandas.api.types as types
 from pandas import Interval
 
-from .cacheutils import get_hash
-from .formatutils import try_fmt_num
-from .logutils import setup_logger
+from scpyutils.cacheutils import get_hash
+from scpyutils.formatutils import try_fmt_num
+from scpyutils.logutils import setup_logger
 
 LOGGER = setup_logger(__name__)
 
@@ -72,35 +77,32 @@ class GenericDataPartitioner(DataPartitioner):
     ) -> Union[pd.DataFrame, pd.Series]:
         """Create an instance of GenericDataPartitioner.
 
-        Arguments:
-            n_parts (int): number of parts to partition the Dataframe to.
-                Defaults to None and in that case you should provide a
-                partition_fld. If not None and partition field is also
-                provided will hash the partition_fld (unless suppressed by
-                the partition_fld_needs_hashing param) and attempt to take
-                mod with n_parts.
-            partition_fld (str): field name to be used as the partition_fld.
-                Make sure there are no more than 32 unique values. Defaults to
-                None and in that case you should provide n_parts to do sequential
-                partition. If not None and n_parts field is also provided, will
-                hash the partition_fld (unless suppressed by the
-                partition_fld_needs_hashing param) and attempt to take mod with
-                n_parts.
-            partition_fld_needs_hashing (bool): whether to skip costly step
-                of hashing the partition_fld. (default values depend on null-ness
-                of n_parts and partition_fld: defaults to False when only
-                partition_fld is provided because it assumes you are picking a
-                partition field whose values are already appropriate to create
-                less than 32 approximately evenly-sized groups. defaults to True
-                when when both n_parts and partition_fld are provide as the mod
-                of the partition_fld is generally assumed to not be a good
-                partitioner, but if you know otherwise feed free to force this to
-                be True.)
-            yield_partition_val (bool): whether the partition val should be
-                sent as the second argument in the yield (default to False)
+        Args:
+            n_parts: Number of parts to partition the Dataframe to. Defaults to None
+                and in that case you should provide a partition_fld. If not None and
+                partition field is also provided will hash the partition_fld (unless
+                suppressed by the partition_fld_needs_hashing param) and attempt to
+                take mod with n_parts.
+            partition_fld: field name to be used as the partition_fld. Make sure
+                there are no more than 32 unique values. Defaults to None and in that
+                case you should provide n_parts to do sequential partition. If not
+                None and n_parts field is also provided, will hash the partition_fld
+                (unless suppressed by the partition_fld_needs_hashing param) and
+                attempt to take mod with n_parts.
+            partition_fld_needs_hashing: Whether to skip costly step of hashing the
+                partition_fld. (default values depend on null-ness of n_parts and
+                partition_fld: defaults to False when only partition_fld is provided
+                because it assumes you are picking a partition field whose values are
+                already appropriate to create less than 32 approximately evenly-sized
+                groups. defaults to True when when both n_parts and partition_fld are
+                provide as the mod of the partition_fld is generally assumed to not
+                be a good partitioner, but if you know otherwise feed free to force
+                this to be True.)
+            yield_partition_val: Whether the partition val should be sent as the
+                second argument in the yield (default to False)
 
         Yields:
-            (pd.DataFrame | pd.Series) of partitions
+            DataFrame or Series of partitions
         """
         self.partition_fld = partition_fld
         self.n_parts = n_parts
@@ -117,7 +119,8 @@ class GenericDataPartitioner(DataPartitioner):
         if self.partition_fld_needs_hashing and partition_fld_needs_hashing is None:
             warn_msg = (
                 "To get rid of this warning pass in the partition_fld_needs_hashing"
-                f" for partition_fld='{self.partition_fld}' explicitly! Guessing you want it to be True."
+                f" for partition_fld='{self.partition_fld}' explicitly!"
+                " Guessing you want it to be True."
             )
             LOGGER.warning(warn_msg)
 
@@ -180,7 +183,10 @@ class GenericDataPartitioner(DataPartitioner):
                 partition = df.loc[partition_vals == partition_val]
                 # _is_copy is deprecated as of 0.23.0, may have to live with warning
                 partition._is_copy = False  # pylint: disable=protected-access
-            debug_msg = f"yielding result of length {len(partition):,.0f} records for partition_val={partition_val}"
+            debug_msg = (
+                f"yielding result of length {len(partition):,.0f} records"
+                f" for partition_val={partition_val}"
+            )
             LOGGER.debug(debug_msg)
             if self.yield_partition_val:
                 yield partition, partition_val
@@ -212,15 +218,17 @@ class GenericDataMerger(DataMerger):
         df = pd.concat(res_list)
         if not isinstance(dtypes, pd.Series):
             return df
-        # concat sometimes messed up the types (e.g. categories may turn into string). Force them back
+        # Concat sometimes messed up the types (e.g. categories may turn into string).
+        # Force them back.
         for fld, dtype in dtypes.iteritems():
             new_dtype = str(df[fld].dtype)
             old_dtype = str(dtype)
             if new_dtype != old_dtype:
                 df[fld] = df[fld].astype(old_dtype)
             if old_dtype == "category":
-                # This is a crude workaround which does not guarantee original sort order
-                # force the sort order to be string-based with fields which are already string at the top
+                # This is a crude workaround which does not guarantee original sort
+                # order force the sort order to be string-based with fields which are
+                # already string at the top.
                 df[fld].cat.reorder_categories(
                     sorted(
                         df[fld].cat.categories,
@@ -243,20 +251,18 @@ def apply_parallel(
 ) -> Union[pd.DataFrame, pd.Series]:
     """Apply a function to a DataFrame with n_parts parallel processes.
 
-    Arguments:
-        func (Callable): function which takes a slice data and outputs the
-            translated data.
-        df (List, pd.DataFrame | pd.Series | np.ndarray): the data.
-        partitioner (DataPartitioner): an iterator which iterates over
-            data partitions. (defaults to `GenericDataPartitioner`)
-        merger (DataMerger): function that takes a list of all processed
-            data and merges them. (defaults to `GenericDataMerger`)
-        pool_size (int): size of process pool. (defaults to None and will
-            use as many processes as many processes and CPUs.)
+    Args:
+        func: Function which takes a slice data and outputs the translated data.
+        df: DataFrame.
+        partitioner: An iterator which iterates over data partitions. (defaults to
+            `GenericDataPartitioner`)
+        merger: Function that takes a list of all processed data and merges them.
+            (defaults to `GenericDataMerger`)
+        pool_size: Size of process pool. (defaults to None and will use as many
+            processes as many processes and CPUs.)
 
     Returns:
-        (List | pd.DataFrame | pd.Series | np.ndarray) data with the
-        `func` applied to them.
+        Data with the `func` applied to them.
     """
     pool_size = pool_size or cpu_count()
     pool = Pool(pool_size)
@@ -277,8 +283,14 @@ def apply_parallel(
 
 def get_pd_friendly_col_name(col: Any) -> str:
     return re.sub(
-        "[^A-Za-z0-9_]", "_", re.sub("^([^_A-Za-z])", "_\g<1>", str(col))
-    )  # pylint: disable=anomalous-backslash-in-string  # noqa=W605
+        "[^A-Za-z0-9_]",
+        "_",
+        re.sub(
+            "^([^_A-Za-z])",
+            "_\g<1>",  # pylint: disable=anomalous-backslash-in-string  # noqa=W605
+            str(col),
+        ),
+    )
 
 
 def flatten_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -304,7 +316,7 @@ def get_datetime_int_from_epoch(
     more useful for grouping.
 
     Returns:
-        (int) something like 20190101.
+        Integer date (e.g. 20190101)
     """
     return (
         pd.to_datetime(sr, unit=unit)
@@ -343,7 +355,8 @@ def unique_count(sr: Union[pd.Series, List]) -> int:
 def reduce_unique_sorted(
     sr: Union[pd.Series, List], old_delim: str = ", ", new_delim: str = ", "
 ) -> List[str]:
-    """Given a series, force it to be string and reduce it into a delim-separated sorted set.
+    """Force Series to be string and reduce it into a delim-separated sorted set.
+
     Useful for aggregating groupby results.
     """
     return new_delim.join(
@@ -376,18 +389,22 @@ def try_strip(x: Any) -> Any:
 
 
 def force_strip_str(x: Any) -> str:
-    "Force stripping regardless of whether it is string or not (force everything to be string)."
+    """Force stripping regardless of whether it is string or not.
+
+    Force everything to be string.
+    """
     return x.strip() if isinstance(x, str) else "" if pd.isnull(x) else str(x).strip()
 
 
 def get_unique_sorted(
     sr: pd.Series, old_delim: str = ", ", new_delim: str = ", ", fillna: str = ""
 ):
-    """Given a Series which points to old_delim-separated string data, returns a new Series
-    with new_delim-separated string data which is unique and sorted
-    (Useful for cleaning up SQL returned data as this operation is hard to do in SQL).
-    By default fills na values with empty string.
-    """
+    """Get unique sorted values.
+
+    Given a Series which points to old_delim-separated string data, returns a new
+    Series with new_delim-separated string data which is unique and sorted (Useful
+    for cleaning up SQL returned data as this operation is hard to do in SQL). By
+    default fills na values with empty string."""
     if not old_delim or not isinstance(old_delim, str):
         raise Exception("old_delim must be non-empty string")
 
@@ -422,7 +439,8 @@ def apply_dim_filters(df: pd.DataFrame, dim_filters: Dict, verbose: bool = True)
     """
     if set(dim_filters) - set(df.index.names):
         raise Exception(
-            f"dim_filter={list(dim_filters)} not all available in index={df.index.names}"
+            f"dim_filter={list(dim_filters)} not all available in"
+            f" index={df.index.names}"
         )
     indexer = tuple(dim_filters.get(fld, slice(None)) for fld in df.index.names)
     if verbose:
@@ -442,13 +460,13 @@ def safe_fillna(
 ) -> pd.DataFrame:
     """fillna which does not fail on category fields, instead adds the category.
 
-    Arguments:
-        df (pd.DataFrame): Dataframe to fill na values for.
-        col (str): column name.
-        fill_val (Any): value to fill with.
+    Args:
+        df: Dataframe to fill na values for.
+        col: Column name.
+        fill_val: Value to fill with.
 
     Returns:
-        (pd.DataFrame) with NA values filled safely. (not a copy)
+        DataFrame with NA values filled safely. (not a copy)
     """
     if df is None or not len(df):  # pylint: disable=len-as-condition
         return df
@@ -473,16 +491,16 @@ def safe_sort(
     Note that if a field is not sortable because of TypeError, this will
     still throw an exception.
 
-    Arguments:
-        df (pd.DataFrame): DataFrame to sort.
-        sort_fld (str, List[str]): field or list of fields to sort by. If you
-            want to sort by index pass "__index__".
-        ascending (bool, List[bool]): whether sort order should be ascending.
-        inplace (bool): whether sort should be done on the same DataFrame (to
+    Args:
+        df: DataFrame to sort.
+        sort_fld: Field or list of fields to sort by. If you want to sort by index
+            pass "__index__".
+        ascending: Whether sort order should be ascending.
+        inplace: Whether sort should be done on the same DataFrame (to
             save memory).
 
     Returns:
-        (pd.DataFrame) sorted safely.
+        DataFrame sorted safely.
     """
     if sort_fld == "__index__":
         if inplace:
@@ -533,20 +551,19 @@ def get_sorted_groups(
 ) -> pd.DataFrame:
     """Sort a DataFrame by its group totals. (uses stable sorting algorithm).
 
-    Arguments:
-        df (pd.DataFrame): DataFrame object
-        sort_fld (str): name of field to be summed for sorting
-        groupby_flds (List[Str]): subset of fields in the index which were
-            used to define the sort groups. (defaults to None, which results
-            in taking all but the last index field).
-        ascending (bool): whether groups should be sorted by increasing
-            order. (default to False).
-        drop_group_totals (bool): whether the intermediate group totals which
-            are used for sorting should be dropped or not. (defaults to True
-            and drops them).
+    Args:
+        df: DataFrame.
+        sort_fld: Name of field to be summed for sorting.
+        groupby_flds: Subset of fields in the index which were used to define the
+            sort groups. (defaults to None, which results in taking all but the
+            last index field).
+        ascending: Whether groups should be sorted by increasing order. (default to
+            False).
+        drop_group_totals: Whether the intermediate group totals which are used for
+            sorting should be dropped or not. (defaults to True and drops them).
 
     Returns:
-        (pd.DataFrame) sorted by group totals.
+        DataFrame sorted by group totals.
     """
     if groupby_flds is None:
         groupby_flds = df.index.names[:-1]
@@ -570,23 +587,22 @@ def adorn_with_pcnt(
     """Given a DataFrame and list of field names, for each field add the percent and
     cumulative percent fields.
 
-    Arguments:
-        df (pd.DataFrame): Dataframe with possible multi-index and at least a numerical
+    Args:
+        df: Dataframe with possible multi-index and at least a numerical
             column to sum.
-        fld (str | List[str]): name of field(s) to calculate percentages for.
-        cum (bool): whether the cumulative sum field should be added.
-        sort_fld (str | List[str]): field (or list of field names) to sort final results by
-            before calculating cumulative counts (default to None meaning
-            data is assumed to be sorted).
-        ascending (bool | List[bool]): boolean (or list of booleans) indicating initial sort
-            order (default to False meaning sort order is largest to
-            smallest), Note that groupby_sort_order overrides this
-            sort order.
-        groupby_flds (str | List[str]): field (or list of field names) to
-            group the percentages by (default to None meaning everything is in one group).
+        fld: Name of field(s) to calculate percentages for.
+        cum: Whether the cumulative sum field should be added.
+        sort_fld: Field (or list of field names) to sort final results by before
+            calculating cumulative counts (default to None meaning data is assumed to
+            be sorted).
+        ascending: Boolean (or list of booleans) indicating initial sort order
+            (default to False meaning sort order is largest to smallest), Note that
+            groupby_sort_order overrides this sort order.
+        groupby_flds: Field (or list of field names) to group the percentages by
+            (default to None meaning everything is in one group).
 
     Returns:
-        (pd.DataFrame) with percent columns added.
+        DataFrame with percent columns added.
     """
     if not isinstance(fld, list):
         fld = [fld]
@@ -638,18 +654,18 @@ def get_filtered_groups(
 ) -> pd.DataFrame:
     """Filter DataFrame based on a generic function applied to a field in each group.
 
-    Arguments:
-        df (pd.DataFrame): DataFrame object.
-        filter_fld (str): name of field to use for filtering.
-        filter_func (Callable): function which takes a series of filter_fld
+    Args:
+        df: DataFrame object.
+        filter_fld: Name of field to use for filtering.
+        filter_func: Function which takes a series of filter_fld
             values and return either a single boolean or a boolean array of
             same dimension indicating which values to keep.
-        groupby_flds (List[str]): subset of fields in the index which were
+        groupby_flds: Subset of fields in the index which were
             used to define the groups. (defaults to None, which results in
             taking all but the last index field).
 
     Returns:
-        (pd.DataFrame) filtered DataFrame.
+        Filtered DataFrame.
     """
     if groupby_flds is None:
         groupby_flds = df.index.names[:-1]
@@ -668,9 +684,9 @@ def get_binned(
 ) -> pd.Series:
     """Given a Series and optional bins, return the Series of binned values.
 
-    Arguments:
-        sr (pd.Series): Series with numeric (possibly NaN) values.
-        bins : array of binning boundaries (to avoid dropping make sure first
+    Args:
+        sr: Series with numeric (possibly NaN) values.
+        bins: array of binning boundaries (to avoid dropping make sure first
             and last are -np.inf and np.inf). (defaults to None and will try to
             figure out nice boundaries based on percentiles).
         bin_pctls: array of percentiles to be used as boundaries for binning.
@@ -679,15 +695,15 @@ def get_binned(
         fillna_val: if you think na values should be set to some valid value
             (e.g. 0), then set them here. (defaults to None and will not fill
             the na values).
-        na_bucket_label (str): label to use for binning null values. Since pandas
-            drops na values but this is often not the desired behavior,
-            provide a label to the na bucket. (defaults to string "-").
-        right (bool): whether the bins should be right-inclusive
-        include_lowest (bool): whether the first interval should be
-            left-inclusive or not. (default to True).
+        na_bucket_label: Label to use for binning null values. Since pandas drops na
+            values but this is often not the desired behavior, provide a label to the
+            na bucket. (defaults to string "-").
+        right: Whether the bins should be right-inclusive
+        include_lowest: Whether the first interval should be left-inclusive or not.
+            (default to True).
 
     Returns:
-        (pd.Series) of binned values.
+        Series of binned values.
     """
     if fillna_val:
         sr = sr.fillna(fillna_val)
@@ -737,18 +753,16 @@ def apply_filter_by_agg_query(
     metrics as the first level and their stats as the second level, use queries
     on latter to filter the former.
 
-    Arguemnts:
-        df (pd.DataFrame): DataFrame with MultiIndex and singel level columns
-        df_agg (pd.DataFrame) : DataFrame with same MultiIndex as df minus
-            the last level, and MultiIndex columns where the first level is
-            same as df and second level is aggregate stats from squashing the
-            the last index level.
+    Args:
+        df: DataFrame with MultiIndex and singel level columns
+        df_agg: DataFrame with same MultiIndex as df minus the last level, and
+            MultiIndex columns where the first level is same as df and second level
+            is aggregate stats from squashing the the last index level.
         agg_ts_query: map from metric name to query string to be applied to the
             stats.
 
     Returns:
-        (Tuple[pd.DataFrame, pd.DataFrame]) filtered version of both
-            Dataframes passed to it.
+        Tuple of filtered version of both Dataframes passed to it.
     """
     if verbose:
         LOGGER.info(
@@ -787,18 +801,17 @@ def apply_filter_by_agg_query(
 def get_merged_interval_mappings(
     intervals: pd.Interval, boundaries: List[float]
 ) -> Dict[pd.Interval, List[Interval]]:
-    """Given an iterable of intervals and some boundaries, returns a dictionary which maps the
-    old intervals to a new set of merged intervals.
+    """Given an iterable of intervals and some boundaries, returns a dictionary which
+    maps the old intervals to a new set of merged intervals.
 
-    Arguments:
-        intervals (List[pd.Interval]): list of pd.Interval objects (typically
-            from a pd.cut operation).
-        boundaries (List[Boundary]): list of boundaries (must be a subset of
-            the boundaries in the intervals list) (hint: to remap everything
-            to same bucket, pass empty list or [-np.inf, np.inf]).
+    Args:
+        intervals: List of pd.Interval objects (typically from a pd.cut operation).
+        boundaries: List of boundaries (must be a subset of the boundaries in the
+            intervals list) (hint: to remap everything to same bucket, pass empty
+            list or [-np.inf, np.inf]).
 
     Returns:
-        (Dict[pd.Interval, List[Interval]]) mapping from old interval to list of new intervals.
+        Dictionary mapping from old interval to list of new intervals.
     """
     intervals = sorted(set(intervals))
     allowed_boundaries = set(

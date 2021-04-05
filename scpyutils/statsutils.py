@@ -1,3 +1,9 @@
+"""
+Utilities for stats.
+
+Author: Sam Cohan
+"""
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -6,7 +12,7 @@ from scipy import stats
 def weighted_percentile(vals, percentiles, weights=None, vals_sorted=False):
     """This function is very close to to np.percentile, but supports weights.
 
-    Arguments
+    Args
         val (ArrayLike): array-like of values
         percentiles (ArrayLike): array-like of percentiles in range [0,100]
         weights (ArrayLike): array-like of the same length as vals (defaults
@@ -39,7 +45,7 @@ def get_pctl_range_func(lower_pctl, upper_pctl):
     groupby aggregate. The function name will follow pattern
     pctl_range_<two_digit_lower_pctl>_two_digit_upper_pctl.
 
-    Arguments:
+    Args:
         lower_pctl (int): int between 0 and 99 indicating the lower
             percentile score.
         upper_pctl (int): int between upper_pctl and 99 indicating the upper
@@ -67,7 +73,7 @@ def get_pctl_func(pctl, drop_zeros=False):
     groupby aggregate.
     The function name will follow pattern pctl_<two_digit_pctl_score>.
 
-    Arguments:
+    Args:
         pctl (int): int between 0 and 100 indicating the percentile score to
             calculate value for.
         drop_zero -- boolean indicating whether zero values should be dropped
@@ -124,7 +130,7 @@ def get_anomalous_prob(x_pos, n_trial, non_anomalous_interval):
     greater) because if we see every single event as positive, the test
     assumes there is no chance of an event not converting.
 
-    Arguments:
+    Args:
         x_pos (int): number of positive outcomes
         n_trial (int): integer number of trials
         non_anomalous_interval (Tuple[float, float]) -- tuple of two floats
@@ -150,7 +156,9 @@ def get_anomalous_prob(x_pos, n_trial, non_anomalous_interval):
 
 def get_binomial_conf_interval(x_pos, n_tot, conf=0.95):
     """Returns the Agresti-Couli Interval ([lower-bound upper-bound]).
-    See http://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Agresti-Coull_Interval A
+    See
+    http://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Agresti-Coull_Interval
+    A
     good discussion of the various confidence interval formulae is in this paper:
     http://projecteuclid.org/DPubS/Repository/1.0/Disseminate?view=body&id=pdf_1&handle=euclid.ss/1009213286;
     it is shown in particular that the A-C interval always strictly contains
@@ -158,7 +166,7 @@ def get_binomial_conf_interval(x_pos, n_tot, conf=0.95):
     almost always dealing with large n and would prefer to have more conservative
     confidence interval estimates, A-C seems a good fit.
 
-    Arguments
+    Args
         x_pos (int): natural integer indicating number of positive samples
         n_tot (int): natural integer indicating number of total samples
         conf (float): float in range [0, 1] indicating probability of success

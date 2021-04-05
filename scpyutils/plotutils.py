@@ -1,8 +1,8 @@
 """
 Plotting utilities.
+
+Author: Sam Cohan
 """
-
-
 import datetime
 import re
 import sys
@@ -15,7 +15,7 @@ import pandas as pd
 
 from formatutils import try_fmt_datetime, try_fmt_num, try_fmt_timedelta
 
-from .statsutils import weighted_percentile
+from scpyutils.statsutils import weighted_percentile
 
 CM_COOLWARM = mpl.cm.coolwarm  # pylint: disable=no-member
 
@@ -23,11 +23,10 @@ CM_COOLWARM = mpl.cm.coolwarm  # pylint: disable=no-member
 def add_value_labels(ax: mpl.axes.Axes, spacing: int = 5, format_str: str = "{:,.2f}"):
     """Add labels to the end of each bar in a bar chart.
 
-    Arguments:
-        ax (matplotlib.axes.Axes): The matplotlib object containing the axes
-            of the plot to annotate.
-        spacing (int): The distance between the labels and the bars.
-        format_str (str): format to be used for the values.
+    Args:
+        ax: The matplotlib object containing the axes of the plot to annotate.
+        spacing: The distance between the labels and the bars.
+        format_str: Format to be used for the values.
     """
 
     # For each bar: Place a label
@@ -259,15 +258,15 @@ def _get_axes(*args, **kwargs):  # pylint: disable=unused-argument
 def plot(xs, ys, *args, **kwargs):
     """Wrapper for matplotlib's plot and steps function.
 
-    Arguments:
-        xs: bottom axis values
-        ys: right axis values
-        ax (matplotlib.axes.Axes): matplotlib axis in case you want to plot
-            on an existing axis (defaults to None and will create a new
-            figure and axis).
-        ax2 (matplotlib.axes.Axes): same as ax but for right axis.
+    Args:
+        xs: Bottom axis values.
+        ys: Right axis values.
+        ax: matplotlib axis in case you want to plot on an existing axis (defaults to
+            None and will create a new figure and axis).
+        ax2: Same as ax but for right axis.
     """
-    # since pandas timestamps are not properly supported, turn them into datetime.datetime
+    # Since pandas timestamps are not properly supported, turn them into
+    # datetime.datetime.
     if pd.api.types.is_datetime64_any_dtype(xs) or np.all(
         [pd.isnull(x) or isinstance(x, pd.Timestamp) for x in xs]
     ):
@@ -295,7 +294,8 @@ def plot(xs, ys, *args, **kwargs):
     if kwargs.get("y2cum"):
         if not ax2:
             raise Exception(
-                "WARINNG: no ax2 available to plot y2cum (make sure you provide ax2 or set y2label)"
+                "WARINNG: no ax2 available to plot y2cum (make sure you provide ax2"
+                " or set y2label)"
             )
         y2s = np.cumsum(ys)
         if kwargs.get("cum_normed", True):
@@ -391,15 +391,13 @@ def plot_percentiles(
     25th and 75th percentiles with dash-dots
     50th percentile with dashes
 
-    Arguments:
-        ax (matplotlib.axes.Axes): matplotlib axis
-        vals: array like of values.
-        weights: array-like of the same length as vals (defaults to None
-            meaning equal weights)
-        clip_min: numeric indicating if the plotted values were clipped from
-            below.
-        clip_max: numeric indicating if the plotted values were clipped from
-            above.
+    Args:
+        ax: matplotlib axis.
+        vals: Array-like of values.
+        weights: Array-like of the same length as vals (defaults to None meaning
+            equal weights)
+        clip_min: numeric indicating if the plotted values were clipped from below.
+        clip_max: numeric indicating if the plotted values were clipped from above.
     """
     percentiles = [10, 25, 50, 75, 90]
     color = "red" if color is None else color
@@ -439,9 +437,9 @@ PRESET_TABLE_BBOXES = {
 def plot_hist(vals, weights=None, **kwargs):
     """Wrap matplotlib's hist in a function that makes it easier to use.
 
-    Arguments:
-        vals: array-like of values to be used for histogram
-        weights: optional array-like of weights corresponding to vals
+    Args:
+        vals: Array-like of values to be used for histogram.
+        weights: Optional array-like of weights corresponding to vals
         ax: matplotlib axis in case you want to plot on an existing axis
             (defaults to None and will create a new figure and axis)
         ax2: same as ax but for right axis
@@ -584,15 +582,15 @@ def compare_hists(
 ):
     """Compare two histograms.
 
-    Arguments:
-        df (pd.DataFrame)L Dataframe of raw data.
-        filter_func (Callable): a function that takes the df and for returns
+    Args:
+        df: Dataframe of raw data.
+        filter_func: a function that takes the df and for returns
             a series of booleans indicating whether the row at that index
             should be kept or not.
-        field (str): name of the field used for plotting histogram.
-        label_for_filter (str): label to be used in the legend for the series
+        field: name of the field used for plotting histogram.
+        label_for_filter: label to be used in the legend for the series
             which passes the filter.
-        label_for_complement (str): label to be used in the lenged for the
+        label_for_complement: label to be used in the lenged for the
             series which does not pass filter.
     """
     kwargs = {
@@ -660,26 +658,26 @@ def plot_marked_with_cum(
     around the sorted values of another variable (e.g. are most blocked
     source apps in the top spending apps?)
 
-    Arguments:
-        df (pd.DataFrame): DataFrame of the grouped data.
-        y_fld (str): column name for y-axis data.
-        x_fld (str): column name for x-axis data. If None, then it is assumed
+    Args:
+        df: DataFrame of the grouped data.
+        y_fld: Column name for y-axis data.
+        x_fld: Column name for x-axis data. If None, then it is assumed
             the x-axis will just be integer indexes starting at zero (defaults to None)
-        sort_fld (str): columne name to sort by before plotting to see how
+        sort_fld: Column name to sort by before plotting to see how
             the cumulative of the y-data changes as a function of changing
             sort_fld (defaults to None which means do not sort).
-        ascending (bool): whether the sort should be ascending (default to
+        ascending: Whether the sort should be ascending (default to
             False i.e. descending).
-        marked_ids (set): set of ids which should be values from the df index
+        marked_ids: Set of ids which should be values from the df index
             and if a match will cause red dot to appear on the point on the graph.
-        xlim (Tuple): x limits (default to None which means show full range).
-        ylim (Tuple): y limits (defaults to None which means show full range).
-        xlabel (str): label on x-axis (defaults to x_fld or 'index').
-        ylabel (str): label on left y-axis (defaults to y_fld).
-        y2label (str): label on right y-axis
-        color (str): color of left y-axis line
-        y2color (str): Color of right y-axis cumulative line
-        title (str): String title of plot (default to '<y_fld> and its cumulative')
+        xlim: x limits (default to None which means show full range).
+        ylim: y limits (defaults to None which means show full range).
+        xlabel: Label on x-axis (defaults to x_fld or 'index').
+        ylabel: Label on left y-axis (defaults to y_fld).
+        y2label: Label on right y-axis
+        color: Color of left y-axis line
+        y2color: Color of right y-axis cumulative line
+        title: String title of plot (default to '<y_fld> and its cumulative')
     """
     if not marked_ids:
         marked_ids = set()

@@ -1,5 +1,7 @@
 """
-This module contains useful functions for displaying datetime, timedelta and numerics.
+Utilities useful for for displaying numbers, datetime, timedelta, etc.
+
+Author: Sam Cohan
 """
 
 import datetime

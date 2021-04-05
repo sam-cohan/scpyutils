@@ -3,15 +3,14 @@ This module makes use of exiftool wrapper library pyexiftool.
 Make sure the exiftool is installed and available in your PATH.
 brew install exiftool && pip install pyexiftool
 
-You also need to install pyheif which requires to first install libheif: 
+You also need to install pyheif which requires to first install libheif:
 brew install libheif
 
 To install requirements:
 pip install exifread pandas Pillow piexif pyheif reverse_geocode tqdm
 
-
+Author: Sam Cohan
 """
-
 import datetime
 import hashlib
 import json
@@ -19,18 +18,16 @@ import multiprocessing as mproc
 import os
 import re
 import shutil
-import subprocess
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import exifread
 import exiftool
 import pandas as pd
-import PIL
 import reverse_geocode
 from tqdm.notebook import tqdm_notebook
 
-from .cacheutils import memorize
+from scpyutils.cacheutils import memorize
 
 HASH_KEYS = {
     "File:FileSize",
@@ -222,7 +219,7 @@ def get_create_dt_from_metadata(metadata: dict) -> Optional[pd.Timestamp]:
         try:
             dt = pd.to_datetime(metadata[fld].replace(":", "-", 2))
             break
-        except:
+        except:  # noqa: E722
             pass
     if dt is None:
         print(f"ERROR: Failed to extract create_dt from metadata={metadata}")
@@ -314,7 +311,7 @@ def cleaup_media_files(
     file_paths = sorted(get_all_media_file_paths(src_root_dir))
     print(f"Retrieved {len(file_paths):,.0f} media files from {src_root_dir}")
 
-    print(f"Getting metadatas for all media files...")
+    print("Getting metadatas for all media files...")
     metadatas = get_metadatas_mproc(  # pylint: disable=unexpected-keyword-arg
         file_paths=file_paths, __force_refresh=refresh_metacache
     )

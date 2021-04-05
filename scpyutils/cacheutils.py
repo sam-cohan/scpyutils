@@ -1,5 +1,7 @@
 """
 Utilities related to caching function results.
+
+Author: Sam Cohan
 """
 import datetime
 import hashlib

@@ -1,5 +1,7 @@
 """
 Utilities related to persisting data to file storage.
+
+Author: Sam Cohan
 """
 import datetime
 import json

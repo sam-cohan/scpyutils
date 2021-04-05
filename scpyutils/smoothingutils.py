@@ -1,3 +1,9 @@
+"""
+Utility for smoothing stream of data.
+
+Author: Sam Cohan
+"""
+
 import math
 
 import pandas as pd
@@ -55,7 +61,7 @@ class StreamExponentialSmoother:
         provided with it to explicitely state the units of time between
         equally-spaced points (required for having tau in correct units).
 
-        Arguments:
+        Args:
             alpha (float): alpha parameter of smoother (a.k.a smoothing factor)
                 If you provide alpha, you should also provide `unit_td` which
                 is the timedelta units between the equally spaced points.
@@ -121,7 +127,7 @@ class StreamExponentialSmoother:
     def consume(self, datum, ts=None):
         """Feed next value in the stream to update internal state.
 
-        Arguments:
+        Args:
             datum (float): next data point
             ts (num): current absolute time (default to None if you prefer
                 to imply equally spaced points without specifying time unit.)
@@ -152,7 +158,8 @@ class StreamExponentialSmoother:
                         LOGGER.warning(error_msg)
                     if self.raise_if_time_rewinds:
                         raise Exception(error_msg)
-                    # If there is not exception, then we should just return the previous level.
+                    # If there is not exception, then we should just return the
+                    # previous level.
                     return self._level
                 td = ts - self._last_ts
             alpha = self.get_alpha(td)
@@ -231,7 +238,7 @@ class StreamDoubleExponentialSmoother:
     ):
         """Make an instance of DoubleExponentialStreamSmoother.
 
-        Arguments:
+        Args:
             alpha (float): alpha parameter of smoother (a.k.a smoothing factor)
                 If you provide alpha, you should also provide `unit_td` which
                 is the timedelta units between the equally spaced points.
@@ -301,7 +308,7 @@ class StreamDoubleExponentialSmoother:
     def consume(self, datum, ts=None):
         """Feed next value in the stream to update internal state.
 
-        Arguments:
+        Args:
             datum (float): next data point
             ts (num): current absolute time (default to None if you prefer
                 to imply equally spaced points without specifying time unit.)
@@ -339,13 +346,14 @@ class StreamDoubleExponentialSmoother:
                         LOGGER.warning(error_msg)
                     if self.raise_if_time_rewinds:
                         raise Exception(error_msg)
-                    # If there is not exception, then we should just return the previous level.
+                    # If there is not exception, then we should just return the
+                    # previous level.
                     return self._level
                 td = ts - self._last_ts
                 if self._init_mode:
                     time_since_first = ts - self._first_ts
-                    # Make sure we have at least 5 points and are time_constant from start
-                    # before we start double exponential smoothing.
+                    # Make sure we have at least 5 points and are time_constant from
+                    # start before we start double exponential smoothing.
                     if (
                         self._num_points + 1
                     ) >= 5 and time_since_first > self._level_halflife:

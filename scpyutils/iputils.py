@@ -1,3 +1,9 @@
+"""
+Utilities useful for getting information from IPs
+
+Author: Sam Cohan
+"""
+
 import logging
 import os
 import pathlib
@@ -10,9 +16,8 @@ import requests
 
 import geoip2.database
 import miniupnpc
-
-from . import cacheutils as chu
-from .logutils import setup_logger
+import scpyutils.cacheutils as chu
+from scpyutils.logutils import setup_logger
 
 HOME_DIR = pathlib.Path.home()
 MAXMIND_DBS_ROOT_DIR = os.path.join(HOME_DIR, "data/maxmind_dbs")
@@ -100,7 +105,8 @@ def get_external_ip_from_wtfismyip():
 EXTERNAL_IP_SERVICES = [
     get_external_ip_from_aws,
     get_external_ip_from_checkmyip,
-    # get_external_ip_from_hostip,  # This service does not provide same result as others.
+    # get_external_ip_from_hostip, # This service does not provide same result as
+    # others.
     get_external_ip_from_icanhazip,
     get_external_ip_from_ipify,
     get_external_ip_from_jsonip,
