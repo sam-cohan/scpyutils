@@ -195,13 +195,13 @@ def wrap_for_memorize(
 
 
 def memorize(  # noqa=C901
-    local_root: str,
-    s3_root: Optional[str] = None,
+    local_dir: str,
+    s3_dir: Optional[str] = None,
     save_metadata: bool = True,
     kwargs_formatters: List[Tuple[str, Callable[[Any], str]]] = None,
     func_name_override: Optional[str] = None,
     num_args_to_ignore: int = 0,
-    create_local_root: bool = True,
+    create_local_dir: bool = True,
     strict: bool = False,
     max_filename_len: int = 255,
     hash_len: int = 16,
@@ -226,8 +226,8 @@ def memorize(  # noqa=C901
     __cache_key_append (str): optional string to append to cache file name.
     __out_dict (Optional[Dict]): A dictionary which can be passed in to be populated
         with the cache file paths.
-    __local_root (str): override for `local_dir`.
-    __s3_root (Optional[str]): override for `s3_root`.
+    __local_dir (str): override for `local_dir`.
+    __s3_dir (Optional[str]): override for `s3_dir`.
     __save_metadata (bool): override for `save_metadata`.
     __kwargs_formatters (List[Tuple[str, Callable]]): override for
         `kwargs_formatters`.
@@ -242,8 +242,8 @@ def memorize(  # noqa=C901
     __logger (logging.Logger|Callable): override for `logger`.
 
     Args:
-        local_root: local cache directory
-        s3_root: path to s3 in format "s3://<bucket>/<object_prefix>"
+        local_dir: local cache directory
+        s3_dir: path to s3 in format "s3://<bucket>/<object_prefix>"
         save_metadata: Whether to save metadata about the function call.
         kwargs_formatters: A list of keyword args and their value_formatter
             functions. A value_formatter function is a function that takes the arg
@@ -254,7 +254,7 @@ def memorize(  # noqa=C901
             account in the creation of the cache_key. This can be useful for
             functions where the first arguments are non-hashable accessor like a
             session or shell, etc. (Defaults to 0).
-        create_local_root: whether the cache directory should be created if
+        create_local_dir: whether the cache directory should be created if
             it does not exist. (Defaults to True).
         strict: whether the cache should be invalidated when the function
             implementation is changed. (Defaults to False).
@@ -293,8 +293,8 @@ def memorize(  # noqa=C901
                 "__cache_key_append",
                 "__cache_key_prepend",
                 "__out_dict",
-                "__local_root",
-                "__s3_root",
+                "__local_dir",
+                "__s3_dir",
                 "__save_metadata",
                 "__kwargs_formatters",
                 "__num_args_to_ignore",
@@ -342,10 +342,10 @@ def memorize(  # noqa=C901
                 "___cache_key_append", kwargs.get("__cache_key_append", "")
             )
             _out_dict = kwargs.pop("___out_dict", kwargs.get("__out_dict", {}))
-            _local_root = kwargs.pop(
-                "___local_root", kwargs.get("__local_root", local_root)
+            _local_dir = kwargs.pop(
+                "___local_dir", kwargs.get("__local_dir", local_dir)
             )
-            _s3_root = kwargs.pop("___s3_root", kwargs.get("__s3_root", s3_root))
+            _s3_dir = kwargs.pop("___s3_dir", kwargs.get("__s3_dir", s3_dir))
             _kwargs_formatters = (
                 kwargs.pop(
                     "___kwargs_formatters",
@@ -467,8 +467,8 @@ def memorize(  # noqa=C901
                     f"__{get_hash(_filename[_max_filename_len - 46:])[:hash_len]}"
                     f"{_file_ext}"
                 )
-            _local_path = os.path.join(_local_root, _filename)
-            _s3_path = os.path.join(_s3_root, _filename) if _s3_root else None
+            _local_path = os.path.join(_local_dir, _filename)
+            _s3_path = os.path.join(_s3_dir, _filename) if _s3_dir else None
             _local_metadata_path = (
                 (_local_path.rsplit(".", 1)[0] + ".meta.json")
                 if _save_metadata
@@ -549,8 +549,8 @@ def memorize(  # noqa=C901
                     f"Function call took {duration} seconds. "
                     f"Saving cache file '{_local_path}' ..."
                 )
-                if create_local_root:
-                    pstu.ensure_dirs(_local_root, raise_on_error=False)
+                if create_local_dir:
+                    pstu.ensure_dirs(_local_dir, raise_on_error=False)
                 try:
                     if _save_func:
                         _save_func(res, _local_path)
