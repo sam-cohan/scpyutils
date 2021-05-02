@@ -269,7 +269,7 @@ class GetMetaDatasAugmented:
 
 
 @memorize(
-    local_root="./.cache",
+    local_dir="./.cache",
 )
 def get_metadatas_mproc(
     file_paths: List[str],
