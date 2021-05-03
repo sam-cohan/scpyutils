@@ -64,6 +64,8 @@ HASH_KEYS = {
 
 MEDIA_EXT_RE = "(arw|avi|cr2|dat|divx|gif|heic|jpe?g|mkv|mp4|mov|mpg|png|tiff?)$"
 
+MIN_DT = pd.to_datetime("2000-01-01")
+
 
 def get_hash_from_metadata(metadata: dict):
     hash_content = str(sorted([(k, v) for k, v in metadata.items() if k in HASH_KEYS]))
@@ -207,22 +209,34 @@ def get_location(file_path: str) -> Optional[Tuple[str, str]]:
     return get_location_from_metadata(metadata)
 
 
+def try_get_dt(dt_str: Optional[str]) -> Optional[pd.Timestamp]:
+    if not dt_str:
+        return None
+    try:
+        return pd.to_datetime(dt_str.replace(":", "-", 2)).tz_localize(None)
+    except:  # noqa: E722
+        pass
+
+
 def get_create_dt_from_metadata(metadata: dict) -> Optional[pd.Timestamp]:
-    dt = None
-    for fld in [
-        "EXIF:DateTimeOriginal",
-        "EXIF:ModifyDate",
-        "QuickTime:CreateDate",
-        "RIFF:DateTimeOriginal",
-        "File:FileModifyDate",
-    ]:
-        try:
-            dt = pd.to_datetime(metadata[fld].replace(":", "-", 2))
-            break
-        except:  # noqa: E722
-            pass
-    if dt is None:
+    dts = [
+        try_get_dt(metadata.get(fld))
+        for fld in [
+            "EXIF:DateTimeOriginal",
+            "EXIF:ModifyDate",
+            "QuickTime:CreateDate",
+            "RIFF:DateTimeOriginal",
+            "File:FileModifyDate",
+        ]
+    ]
+    dts = [x for x in dts if x is not None]
+    if not dts:
         print(f"ERROR: Failed to extract create_dt from metadata={metadata}")
+        return None
+    dt = min(dts)
+    if dt < MIN_DT:
+        print(f"ERROR: create_dt before {MIN_DT} is surely impossible")
+        return None
     return dt
 
 
@@ -246,6 +260,7 @@ class GetMetaDatasAugmented:
         self.include_orig_name_in_dest = include_orig_name_in_dest
 
     def __call__(self, file_paths: List[str]) -> List[dict]:
+        assert isinstance(file_paths, list)
         with exiftool.ExifTool() as et:
             metadatas = et.get_metadata_batch(file_paths)
         for metadata in metadatas:
