@@ -390,7 +390,7 @@ def cleaup_media_files(
                     except Exception as e:
                         unexpected_err_cnt += 1
                         error = str(e)
-                        print(f"unable to move src={src_file_path}: {e}")
+                        print(f"unable to {move_or_copy} src={src_file_path}: {e}")
                 if not dry_run:
                     log_file.write(f"{json.dumps(row)}\n")
                 row["error"] = error
