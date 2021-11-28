@@ -10,3 +10,8 @@ Feel free to use at your own risk!
 Note that even though this project has a `setup.py` file for easy `pip install .` usage,
 the setup.py does not include all possible dependencies for all modules. For best
 results, just copy paste the module into your own repo!
+
+You can also install the repo directly as follows:
+```
+pip install -e git+https://github.com/sam-cohan/scpyutils.git#egg=scpyutils
+```
