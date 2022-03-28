@@ -12,8 +12,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from formatutils import try_fmt_datetime, try_fmt_num, try_fmt_timedelta
 
+from scpyutils.formatutils import try_fmt_datetime, try_fmt_num, try_fmt_timedelta
 from scpyutils.statsutils import weighted_percentile
 
 CM_COOLWARM = mpl.cm.coolwarm  # pylint: disable=no-member
