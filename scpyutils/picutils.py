@@ -316,6 +316,7 @@ def cleaup_media_files(
     dry_run: bool = True,
     refresh_metacache: bool = False,
     move_or_copy: str = "move",
+    log_file_path: str = None,
 ):
     assert move_or_copy in [
         "move",
@@ -326,7 +327,7 @@ def cleaup_media_files(
     file_paths = sorted(get_all_media_file_paths(src_root_dir))
     print(f"Retrieved {len(file_paths):,.0f} media files from {src_root_dir}")
 
-    print("Getting metadatas for all media files...")
+    print(f"Getting metadatas for all media files...")
     metadatas = get_metadatas_mproc(  # pylint: disable=unexpected-keyword-arg
         file_paths=file_paths, __force_refresh=refresh_metacache
     )
@@ -352,11 +353,12 @@ def cleaup_media_files(
             if not dry_run:
                 os.makedirs(dest_dir)
 
-    if dry_run:
-        log_file_path = "/dev/null"
-    else:
-        log_file_path = os.path.join(dest_root_dir, "log.txt")
-    print(f"Moving files. Will log output to {log_file_path} ...")
+    if log_file_path is None:
+        if dry_run:
+            log_file_path = "/dev/null"
+        else:
+            log_file_path = os.path.join(dest_root_dir, "log.txt")
+    print("Moving files. Will log output to {log_file_path} ...")
     rows = []
     dest_exists_cnt = 0
     unexpected_err_cnt = 0
@@ -390,9 +392,8 @@ def cleaup_media_files(
                     except Exception as e:
                         unexpected_err_cnt += 1
                         error = str(e)
-                        print(f"unable to {move_or_copy} src={src_file_path}: {e}")
-                if not dry_run:
-                    log_file.write(f"{json.dumps(row)}\n")
+                        print(f"unable to move src={src_file_path}: {e}")
+                log_file.write(f"{json.dumps(row)}\n")
                 row["error"] = error
 
             rows.append(row)
@@ -400,7 +401,7 @@ def cleaup_media_files(
         if success_cnt:
             print(f"Successfully moved {success_cnt:,.0f} files!")
         else:
-            print("WARNING: NO FILES WERE MOVED!")
+            print("NO FILES WERE MOVED!")
         if dest_exists_cnt:
             print(f"WARNING: {dest_exists_cnt:,.0f} destinations already existed!")
         if unexpected_err_cnt:
