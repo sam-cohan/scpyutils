@@ -126,8 +126,8 @@ def get_exif(file_path):
         # Install pyheif with:
         # brew install libheif
         # pip install git+https://github.com/david-poirier-csn/pyheif.git
-        import pyheif
         import piexif
+        import pyheif
 
         return {
             f"{k} {piexif.TAGS[k][kk]['name']}": vv

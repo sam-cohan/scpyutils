@@ -10,12 +10,12 @@ import pathlib
 import random
 import re
 
+import geoip2.database
+import miniupnpc
 import numpy as np
 import pandas as pd
 import requests
 
-import geoip2.database
-import miniupnpc
 import scpyutils.cacheutils as chu
 from scpyutils.logutils import setup_logger
 

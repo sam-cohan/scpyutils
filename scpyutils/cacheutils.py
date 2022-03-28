@@ -13,10 +13,10 @@ import time
 from functools import wraps
 from typing import Any, Callable, List, Optional, Tuple, Union
 
+import dill
 import joblib
 import pandas as pd
 
-import dill
 import scpyutils.persistutils as pstu
 
 
