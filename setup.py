@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup_args = dict(
     name="scpyutils",
-    version="0.0.1",
+    version="0.0.2",
     author="Sam Cohan",
     author_email="samcohan007@gmail.com",
     keywords=[
