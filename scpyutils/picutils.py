@@ -1,7 +1,7 @@
 """
 This module makes use of exiftool wrapper library pyexiftool.
 Make sure the exiftool is installed and available in your PATH.
-brew install exiftool && pip install pyexiftool
+brew install exiftool && pip install pyexiftool==0.4.13
 
 You also need to install pyheif which requires to first install libheif:
 brew install libheif
@@ -358,7 +358,7 @@ def cleaup_media_files(
             log_file_path = "/dev/null"
         else:
             log_file_path = os.path.join(dest_root_dir, "log.txt")
-    print("Moving files. Will log output to {log_file_path} ...")
+    print(f"Moving files. Will log output to {log_file_path} ...")
     rows = []
     dest_exists_cnt = 0
     unexpected_err_cnt = 0
