@@ -1,12 +1,15 @@
 """
 Utilities for logging.
 
-Author: Sam Cohan
+Adopted from https://github.com/sam-cohan/scpyutils/blob/master/scpyutils/logutils.py
 """
 import logging
 import os
 import re
-from typing import Optional
+from collections import OrderedDict
+from typing import Any, Dict, Optional, Union
+
+from pythonjsonlogger import jsonlogger
 
 DEFAULT_FMT = (
     "[%(asctime)s.%(msecs)03d: %(levelname)s]"
@@ -16,126 +19,139 @@ DEFAULT_FMT = (
 DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 
-def setup_logger(
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(
+        self,
+        log_record: Dict[str, Any],
+        record: logging.LogRecord,
+        message_dict: Dict[str, Any],
+    ) -> None:
+        super().add_fields(log_record, record, message_dict)
+        custom_log_record: Dict[str, Any] = OrderedDict()
+        custom_log_record["timeMillis"] = int(record.created * 1000)
+        custom_log_record["level"] = record.levelname
+        custom_log_record["ddsource"] = record.name
+        message_data: Dict[str, Any] = {
+            "message": record.getMessage(),
+            "parameters": {
+                "thread": record.thread,
+                "filename": record.filename,
+                "lineno": record.lineno,
+                "name": record.name,
+                "funcName": record.funcName,
+            },
+        }
+        if hasattr(record, "params"):
+            arbitrary_params = getattr(record, "params")
+            if isinstance(arbitrary_params, dict):
+                message_data["parameters"].update(arbitrary_params)
+
+        custom_log_record["messageData"] = message_data
+        log_record.clear()
+        log_record.update(custom_log_record)
+
+
+def setup_logger(  # noqa: C901
     logger_name: str,
-    file_name: Optional[str] = None,
-    log_to_stdout: bool = True,
-    log_level: int = logging.DEBUG,
-    base_dir: str = "./logs",
-    force_formatting: bool = False,
+    log_to_console: Optional[bool] = None,
+    log_to_file: Optional[bool] = None,
+    level: int = logging.DEBUG,
+    base_dir: Optional[str] = None,
+    force_format: bool = True,
+    log_as_json: Optional[bool] = None,
     fmt: str = DEFAULT_FMT,
     datefmt: str = DEFAULT_DATE_FMT,
 ) -> logging.Logger:
-    """Set up a logger which optionally also logs to file.
-
-    Args:
-        logger_name: name of logger. Note that if you set up a logger
-            with a previously used name, you will simply change properties of
-            the existing logger, so be careful!
-        file_name: name of logging file. If nothing provided, will not
-            log to file
-        log_to_std_out: whether the log should be output to stdout
-            (default: True)
-        log_level: log levels from logging library (default:
-            `logging.DEBUG`)
-        base_dir: directory of where to put the log file (default:
-            "./log")
-        force_formatting: whether to force formatting to that specified by
-            `default_log_format` and `default_time_format` (default: False)
-        fmt: format of log messages (default: DEFAULT_FMT)
-        datefmt: format of timestamp in log messages (default:
-            DEFAULT_DATE_FMT)
-
-    Returns:
-        logger object.
-    """
-    assert file_name or log_to_stdout, "logger without output is useless!"
-
+    if log_to_console is None:
+        log_to_console = get_bool(os.environ.get("LOG_TO_CONSOLE", "1"))
+    if log_to_file is None:
+        log_to_file = get_bool(os.environ.get("LOG_TO_FILE", "1"))
+    if log_as_json is None:
+        log_as_json = get_bool(os.environ.get("LOG_AS_JSON", "0"))
+    if force_format is None:
+        force_format = get_bool(os.environ.get("LOG_FORCE_FORMAT", "1"))
+    if base_dir is None:
+        base_dir = os.environ.get("LOG_BASE_DIR", "./logs")
+    assert log_to_file or log_to_console, "logger without output is useless!"
     _logger = logging.getLogger(logger_name)
 
-    if file_name:
-        # Make sure base_dir is the full dir and file_name is just the filename.
-        log_path = os.path.join(base_dir, file_name)
-        file_name = os.path.basename(log_path)
-        base_dir = os.path.dirname(log_path)
-        # Create the full directory if it does not exist.
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
+    if log_to_file:
         file_handlers = [
             handler
             for handler in _logger.handlers
             if isinstance(handler, logging.FileHandler)
         ]
         if not file_handlers:
+            # Make sure base_dir is the full dir and file_name is just the filename.
+            log_path = os.path.join(base_dir, logger_name + ".log")
+            base_dir = os.path.dirname(log_path)
+            # Create the full directory if it does not exist.
+            if not os.path.exists(base_dir):
+                os.makedirs(base_dir)
             file_handler = logging.FileHandler(log_path, mode="a")
-            # Set the handler log level to DEBUG so it can be controlled at
-            # logger level.
             file_handler.setLevel(logging.DEBUG)
-            set_handler_formatter(file_handler, fmt, datefmt)
+            set_handler_formatter(
+                handler=file_handler,
+                fmt=None if log_as_json else fmt,
+                datefmt=datefmt,
+            )
             _logger.addHandler(file_handler)
-    if log_to_stdout:
+
+    if log_to_console:
         stream_handlers = [
             handler
             for handler in _logger.handlers
             if type(handler) is logging.StreamHandler
         ]
         if not stream_handlers:
-            console_handler = logging.StreamHandler()  # pylint: disable=invalid-name
-            # Set the handler log level to DEBUG so it can be controlled at
-            # logger level.
+            console_handler = logging.StreamHandler()
             console_handler.setLevel(logging.DEBUG)
-            set_handler_formatter(console_handler, fmt, datefmt)
+            set_handler_formatter(
+                handler=console_handler,
+                fmt=None if log_as_json else fmt,
+                datefmt=datefmt,
+            )
             _logger.addHandler(console_handler)
-    if force_formatting:
+    if force_format:
         for handler in _logger.handlers:
-            set_handler_formatter(handler, fmt, datefmt)
-    _logger.setLevel(log_level)
-
+            set_handler_formatter(
+                handler=handler,
+                fmt=None if log_as_json else fmt,
+                datefmt=datefmt,
+            )
+    _logger.setLevel(level)
     return _logger
 
 
 def set_handler_formatter(
     handler: logging.Handler,
-    fmt: str = DEFAULT_FMT,
+    fmt: Optional[str] = DEFAULT_FMT,
     datefmt: str = DEFAULT_DATE_FMT,
 ) -> None:
-    """Set the formatter for a logging handler.
-
-    Args:
-        fmt: format of log messages (default: DEFAULT_FMT)
-        datefmt: format of timestamp in log messages (default: DEFAULT_DATE_FMT)
-    """
-    formatter_class: type[logging.Formatter] 
-    if isinstance(handler, logging.StreamHandler):
-        try:
-            import colorlog
-
-            formatter_class = colorlog.ColoredFormatter
-            fmt = "%(log_color)s" + fmt
-        except ModuleNotFoundError:
-            formatter_class = logging.Formatter
+    if fmt is None:
+        formatter: Union[logging.Formatter, CustomJsonFormatter] = CustomJsonFormatter()
     else:
-        formatter_class = logging.Formatter
-    formatter = formatter_class(fmt=fmt, datefmt=datefmt)
+        if isinstance(handler, logging.StreamHandler):
+            try:
+                import colorlog
+
+                formatter = colorlog.ColoredFormatter(
+                    fmt=f"%(log_color)s{fmt}", datefmt=datefmt
+                )
+            except ModuleNotFoundError:
+                formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+        else:
+            formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
     handler.setFormatter(formatter)
 
 
 def set_all_logger_levels(
-    log_level: int,
+    level: int,
     inc_regex: Optional[str] = None,
     exc_regex: Optional[str] = None,
 ) -> None:
-    """Change logging level for all named loggers.
-
-    Args:
-        log_level: integer log level from `logging` module. positive values mean
-            log level should be at least as aggressive and negative values mean
-            log level should be at least as conservative.
-        inc_regex: regular expression to apply as include filter for logger name.
-        exc_regex: regular expression to apply as exclude filter for logger name.
-    """
-    more_logging = log_level > 0
-    log_level = abs(log_level)
+    more_logging = level > 0
+    level = abs(level)
     loggers = [
         logging.getLogger(name)
         for name in logging.root.manager.loggerDict
@@ -144,7 +160,15 @@ def set_all_logger_levels(
     ]
     for logger in loggers:
         cur_level = logger.getEffectiveLevel()
-        if log_level < cur_level and more_logging:
-            logger.setLevel(log_level)
-        elif log_level > cur_level and not more_logging:
-            logger.setLevel(log_level)
+        if level < cur_level and more_logging:
+            logger.setLevel(level)
+        elif level > cur_level and not more_logging:
+            logger.setLevel(level)
+
+
+def get_bool(s: Optional[Union[str, bool]]) -> bool:
+    if isinstance(s, bool):
+        return s
+    if s is None:
+        return False
+    return s.lower() in {"true", "1", "yes"}
