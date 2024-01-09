@@ -10,17 +10,46 @@ import time
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Union
 
+import colorlog
 from pythonjsonlogger import jsonlogger
 
 DEFAULT_FMT = (
-    "[%(asctime)s.%(msecs)03d: %(levelname)s]"
-    " %(thread)d::%(filename)s::%(lineno)d"
-    " ::%(name)s.%(funcName)s(): %(message)s"
+    "[%(asctime)s: %(levelname)s]"
+    " %(name)s::%(filename)s::%(lineno)d"
+    "::%(module)s.%(funcName)s(): %(message)s"
 )
 DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%f%z"
 
 
-class CustomJsonFormatter(jsonlogger.JsonFormatter):
+class TimeFormatterMixin:
+    def formatTime(
+        self,
+        record: logging.LogRecord,
+        datefmt: Optional[str] = None,
+    ) -> str:
+        """Mixin to handle formatting the %f for milliseconds."""
+        assert isinstance(self, logging.Formatter)
+        # Create the time structure from the timestamp
+        record_time = self.converter(record.created)
+        datefmt = datefmt or DEFAULT_DATE_FMT
+        time_formatted = time.strftime(datefmt, record_time)
+        if datefmt and "%f" in datefmt:
+            millis = int(record.msecs)
+            return time_formatted.replace("f", f"{millis:03d}")
+        return time_formatted
+
+
+class CustomLogFormatter(TimeFormatterMixin, logging.Formatter):
+    pass
+
+
+class CustomColoredFormatter(TimeFormatterMixin, colorlog.ColoredFormatter):
+    pass
+
+
+class CustomJsonFormatter(TimeFormatterMixin, jsonlogger.JsonFormatter):
+    """Custom JSON formatter for logging to Datadog."""
+
     def add_fields(
         self,
         log_record: Dict[str, Any],
@@ -56,19 +85,6 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
 
         log_record.clear()
         log_record.update(custom_log_record)
-
-    def formatTime(self, record: logging.LogRecord, datefmt: Optional[str]=None) -> str:
-        # Create the time structure from the timestamp
-        record_time = self.converter(record.created)
-
-        if datefmt and "%f" in datefmt:
-            time_formatted = time.strftime(datefmt, record_time)
-            # Extract milliseconds and format them
-            millis = int(record.msecs)
-            # Combine the formatted time with milliseconds
-            return time_formatted.replace("f", f"{millis:03d}")
-        else:
-            return super().formatTime(record, datefmt)
 
 
 def setup_logger(  # noqa: C901
@@ -148,22 +164,25 @@ def set_handler_formatter(
     fmt: Optional[str] = DEFAULT_FMT,
     datefmt: str = DEFAULT_DATE_FMT,
 ) -> None:
+    """Set the formatter for the given handler.
+
+    Args:
+        handler: The handler to set the formatter for.
+        fmt: The format string for the formatter (default: DEFAULT_FMT)
+        datefmt: The format string for the timestamp (default: DEFAULT_DATE_FMT).
+    """
     if fmt is None:
         formatter: Union[logging.Formatter, CustomJsonFormatter] = CustomJsonFormatter(
             datefmt=datefmt
         )
     else:
         if isinstance(handler, logging.StreamHandler):
-            try:
-                import colorlog
-
-                formatter = colorlog.ColoredFormatter(
-                    fmt=f"%(log_color)s{fmt}", datefmt=datefmt
-                )
-            except ModuleNotFoundError:
-                formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+            formatter = CustomColoredFormatter(
+                fmt=f"%(log_color)s{fmt}",
+                datefmt=datefmt,
+            )
         else:
-            formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+            formatter = CustomLogFormatter(fmt=fmt, datefmt=datefmt)
     handler.setFormatter(formatter)
 
 
@@ -172,6 +191,13 @@ def set_all_logger_levels(
     inc_regex: Optional[str] = None,
     exc_regex: Optional[str] = None,
 ) -> None:
+    """Set all logger levels.
+
+    Args:
+        level: The level to set the loggers to.
+        inc_regex: Include only loggers matching this regex.
+        exc_regex: Exclude loggers matching this regex.
+    """
     more_logging = level > 0
     level = abs(level)
     loggers = [
@@ -193,6 +219,17 @@ def set_all_logger_handlers_as_json_if_needed(
     exc_regex: Optional[str] = None,
     datefmt: str = DEFAULT_DATE_FMT,
 ) -> None:
+    """Set all logger handlers as JSON if needed.
+
+    Will change the formatter of all handlers of all loggers to JSON if the
+    environment variable LOG_AS_JSON is set to a truthy value.
+
+    Args:
+        inc_regex: Include only loggers matching this regex.
+        exc_regex: Exclude loggers matching this regex.
+        datefmt: The format string for the timestamp (default: DEFAULT_DATE_FMT).
+
+    """
     if get_bool(os.environ.get("LOG_AS_JSON")):
         loggers = [
             logging.getLogger(name)
@@ -207,6 +244,13 @@ def set_all_logger_handlers_as_json_if_needed(
 
 
 def get_bool(s: Optional[Union[str, bool]]) -> bool:
+    """Convert a string to a boolean.
+
+    Values that are considered True: "true", "1", "yes".
+
+    Args:
+        s: The string to convert.
+    """
     if isinstance(s, bool):
         return s
     if s is None:
