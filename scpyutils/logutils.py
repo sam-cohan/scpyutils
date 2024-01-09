@@ -8,6 +8,13 @@ import os
 import re
 from typing import Optional
 
+DEFAULT_FMT = (
+    "[%(asctime)s.%(msecs)03d: %(levelname)s]"
+    " %(thread)d::%(filename)s::%(lineno)d"
+    " ::%(name)s.%(funcName)s(): %(message)s"
+)
+DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
 
 def setup_logger(
     logger_name: str,
@@ -15,7 +22,10 @@ def setup_logger(
     log_to_stdout: bool = True,
     log_level: int = logging.DEBUG,
     base_dir: str = "./logs",
-):
+    force_formatting: bool = False,
+    fmt: str = DEFAULT_FMT,
+    datefmt: str = DEFAULT_DATE_FMT,
+) -> logging.Logger:
     """Set up a logger which optionally also logs to file.
 
     Args:
@@ -30,6 +40,11 @@ def setup_logger(
             `logging.DEBUG`)
         base_dir: directory of where to put the log file (default:
             "./log")
+        force_formatting: whether to force formatting to that specified by
+            `default_log_format` and `default_time_format` (default: False)
+        fmt: format of log messages (default: DEFAULT_FMT)
+        datefmt: format of timestamp in log messages (default:
+            DEFAULT_DATE_FMT)
 
     Returns:
         logger object.
@@ -38,19 +53,12 @@ def setup_logger(
 
     _logger = logging.getLogger(logger_name)
 
-    formatter_str = (
-        "[%(asctime)s.%(msecs)03d: %(levelname)s]"
-        " %(thread)d::%(filename)s::%(lineno)d"
-        " ::%(name)s.%(funcName)s(): %(message)s"
-    )
-    time_format_str = "%Y-%m-%d %H:%M:%S"
-
     if file_name:
-        # make sure base_dir is the full dir and file_name is just the filename
+        # Make sure base_dir is the full dir and file_name is just the filename.
         log_path = os.path.join(base_dir, file_name)
         file_name = os.path.basename(log_path)
         base_dir = os.path.dirname(log_path)
-        # creat the full directory if it does not exist
+        # Create the full directory if it does not exist.
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
         file_handlers = [
@@ -60,12 +68,10 @@ def setup_logger(
         ]
         if not file_handlers:
             file_handler = logging.FileHandler(log_path, mode="a")
-            # set the handler log level to DEBUG so it can be controlled at logger level
+            # Set the handler log level to DEBUG so it can be controlled at
+            # logger level.
             file_handler.setLevel(logging.DEBUG)
-            formatter = logging.Formatter(  # pylint: disable=invalid-name
-                formatter_str, time_format_str
-            )
-            file_handler.setFormatter(formatter)
+            set_handler_formatter(file_handler, fmt, datefmt)
             _logger.addHandler(file_handler)
     if log_to_stdout:
         stream_handlers = [
@@ -75,32 +81,50 @@ def setup_logger(
         ]
         if not stream_handlers:
             console_handler = logging.StreamHandler()  # pylint: disable=invalid-name
-            # set the handler log level to DEBUG so it can be controlled at logger level
+            # Set the handler log level to DEBUG so it can be controlled at
+            # logger level.
             console_handler.setLevel(logging.DEBUG)
-            try:
-                import colorlog
-
-                formatter_class = colorlog.ColoredFormatter
-                formatter_str = "%(log_color)s" + formatter_str
-            except:  # noqa: E722
-                formatter_class = logging.Formatter
-            formatter = formatter_class(
-                formatter_str,
-                time_format_str,
-            )
-            console_handler.setFormatter(formatter)
+            set_handler_formatter(console_handler, fmt, datefmt)
             _logger.addHandler(console_handler)
-
+    if force_formatting:
+        for handler in _logger.handlers:
+            set_handler_formatter(handler, fmt, datefmt)
     _logger.setLevel(log_level)
 
     return _logger
+
+
+def set_handler_formatter(
+    handler: logging.Handler,
+    fmt: str = DEFAULT_FMT,
+    datefmt: str = DEFAULT_DATE_FMT,
+) -> None:
+    """Set the formatter for a logging handler.
+
+    Args:
+        fmt: format of log messages (default: DEFAULT_FMT)
+        datefmt: format of timestamp in log messages (default: DEFAULT_DATE_FMT)
+    """
+    formatter_class: type[logging.Formatter] 
+    if isinstance(handler, logging.StreamHandler):
+        try:
+            import colorlog
+
+            formatter_class = colorlog.ColoredFormatter
+            fmt = "%(log_color)s" + fmt
+        except ModuleNotFoundError:
+            formatter_class = logging.Formatter
+    else:
+        formatter_class = logging.Formatter
+    formatter = formatter_class(fmt=fmt, datefmt=datefmt)
+    handler.setFormatter(formatter)
 
 
 def set_all_logger_levels(
     log_level: int,
     inc_regex: Optional[str] = None,
     exc_regex: Optional[str] = None,
-):
+) -> None:
     """Change logging level for all named loggers.
 
     Args:
