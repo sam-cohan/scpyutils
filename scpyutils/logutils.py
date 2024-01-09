@@ -1,11 +1,12 @@
 """
 Utilities for logging.
 
-Adopted from https://github.com/sam-cohan/scpyutils/blob/master/scpyutils/logutils.py
+Author: Sam Cohan
 """
 import logging
 import os
 import re
+import time
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Union
 
@@ -16,7 +17,7 @@ DEFAULT_FMT = (
     " %(thread)d::%(filename)s::%(lineno)d"
     " ::%(name)s.%(funcName)s(): %(message)s"
 )
-DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
+DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%f%z"
 
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
@@ -39,6 +40,8 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
                 "lineno": record.lineno,
                 "name": record.name,
                 "funcName": record.funcName,
+                "module": record.module,
+                "timestamp": self.formatTime(record, self.datefmt),
             },
         }
         if hasattr(record, "params"):
@@ -46,9 +49,26 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
             if isinstance(arbitrary_params, dict):
                 message_data["parameters"].update(arbitrary_params)
 
+        if record.exc_info:
+            message_data["exception"] = self.formatException(record.exc_info)
+
         custom_log_record["messageData"] = message_data
+
         log_record.clear()
         log_record.update(custom_log_record)
+
+    def formatTime(self, record: logging.LogRecord, datefmt: Optional[str]=None) -> str:
+        # Create the time structure from the timestamp
+        record_time = self.converter(record.created)
+
+        if datefmt and "%f" in datefmt:
+            time_formatted = time.strftime(datefmt, record_time)
+            # Extract milliseconds and format them
+            millis = int(record.msecs)
+            # Combine the formatted time with milliseconds
+            return time_formatted.replace("f", f"{millis:03d}")
+        else:
+            return super().formatTime(record, datefmt)
 
 
 def setup_logger(  # noqa: C901
@@ -129,7 +149,9 @@ def set_handler_formatter(
     datefmt: str = DEFAULT_DATE_FMT,
 ) -> None:
     if fmt is None:
-        formatter: Union[logging.Formatter, CustomJsonFormatter] = CustomJsonFormatter()
+        formatter: Union[logging.Formatter, CustomJsonFormatter] = CustomJsonFormatter(
+            datefmt=datefmt
+        )
     else:
         if isinstance(handler, logging.StreamHandler):
             try:
@@ -164,6 +186,24 @@ def set_all_logger_levels(
             logger.setLevel(level)
         elif level > cur_level and not more_logging:
             logger.setLevel(level)
+
+
+def set_all_logger_handlers_as_json_if_needed(
+    inc_regex: Optional[str] = None,
+    exc_regex: Optional[str] = None,
+    datefmt: str = DEFAULT_DATE_FMT,
+) -> None:
+    if get_bool(os.environ.get("LOG_AS_JSON")):
+        loggers = [
+            logging.getLogger(name)
+            for name in logging.root.manager.loggerDict
+            if (inc_regex is None or re.search(inc_regex, name))
+            and (exc_regex is None or not re.search(exc_regex, name))
+        ]
+        for logger in loggers:
+            json_formatter = CustomJsonFormatter(datefmt=datefmt)
+            for handler in logger.handlers:
+                handler.setFormatter(json_formatter)
 
 
 def get_bool(s: Optional[Union[str, bool]]) -> bool:
