@@ -32,11 +32,12 @@ class TimeFormatterMixin:
         # Create the time structure from the timestamp
         record_time = self.converter(record.created)
         datefmt = datefmt or DEFAULT_DATE_FMT
-        time_formatted = time.strftime(datefmt, record_time)
         if datefmt and "%f" in datefmt:
+            datefmt = datefmt.replace("%f", "xxx")
+            time_formatted = time.strftime(datefmt, record_time)
             millis = int(record.msecs)
-            return time_formatted.replace("f", f"{millis:03d}")
-        return time_formatted
+            return time_formatted.replace("xxx", f"{millis:03d}")
+        return time.strftime(datefmt, record_time)
 
 
 class CustomLogFormatter(TimeFormatterMixin, logging.Formatter):
