@@ -177,7 +177,7 @@ def get_binomial_conf_interval(x_pos, n_tot, conf=0.95):
     assert x_pos <= n_tot, "cannot have x_pos={} > n_tot={}".format(x_pos, n_tot)
     alpha = 1 - conf
     z = norm.ppf(1 - alpha / 2)
-    nt = n_tot + z ** 2  # n_tilde in the formula
-    pt = (x_pos + z ** 2 / 2) / nt  # p_tilde in the formula
+    nt = n_tot + z**2  # n_tilde in the formula
+    pt = (x_pos + z**2 / 2) / nt  # p_tilde in the formula
     hw = z * np.sqrt(pt * (1 - pt) / nt)
     return (pt - hw), (pt + hw)

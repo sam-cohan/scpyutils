@@ -191,7 +191,7 @@ def get_coltrans_cols(coltrans: ColumnTransformer) -> List[str]:
     columns = []
     # Note that we have to use the transformers_ member.
     # (the underscore is important as it is the fitted instance)
-    for (name, trans, cols) in coltrans.transformers_:
+    for name, trans, cols in coltrans.transformers_:
         if isinstance(trans, Pipeline):
             ohes = [x for x in trans if isinstance(x, OneHotEncoder)]
             if not ohes:

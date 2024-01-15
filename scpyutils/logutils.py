@@ -8,7 +8,7 @@ import os
 import re
 import time
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import colorlog
 from pythonjsonlogger import jsonlogger
@@ -19,6 +19,50 @@ DEFAULT_FMT = (
     "::%(module)s.%(funcName)s(): %(message)s"
 )
 DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%f%z"
+
+
+# Extend the Logger class to include convenience method for params
+class CustomLogger(logging.Logger):
+    def __init__(self, name: str, level: int = logging.NOTSET) -> None:
+        super().__init__(name, level)
+
+    def _log_with_params(
+        self,
+        level: int,
+        msg: str,
+        args: Tuple[Any, ...] = (),
+        stacklevel: int = 1,
+        **kwargs: Any,
+    ) -> None:
+        # Adjust stacklevel to account for this wrapper
+        stacklevel += 1
+
+        extra = kwargs.pop("extra", {})
+        params = kwargs.pop("params", None)
+        if params:
+            extra["params"] = params
+        elif args and isinstance(args[0], dict):
+            # Assume the first arg is "params" if it's a dict and
+            # "params" isn't already in kwargs
+            extra["params"] = args[0]
+            args = args[1:] if len(args) > 1 else tuple()
+
+        super()._log(level, msg, args, extra=extra, stacklevel=stacklevel, **kwargs)
+
+    def info(self, msg: str, *args, **kwargs) -> None:  # type: ignore
+        self._log_with_params(logging.INFO, msg, args, stacklevel=2, **kwargs)
+
+    def warning(self, msg: str, *args, **kwargs) -> None:  # type: ignore
+        self._log_with_params(logging.WARNING, msg, args, stacklevel=2, **kwargs)
+
+    def debug(self, msg: str, *args, **kwargs) -> None:  # type: ignore
+        self._log_with_params(logging.DEBUG, msg, args, stacklevel=2, **kwargs)
+
+    def error(self, msg: str, *args, **kwargs) -> None:  # type: ignore
+        self._log_with_params(logging.ERROR, msg, args, stacklevel=2, **kwargs)
+
+    def critical(self, msg: str, *args, **kwargs) -> None:  # type: ignore
+        self._log_with_params(logging.CRITICAL, msg, args, stacklevel=2, **kwargs)
 
 
 class TimeFormatterMixin:
@@ -64,16 +108,9 @@ class CustomJsonFormatter(TimeFormatterMixin, jsonlogger.JsonFormatter):
         custom_log_record["ddsource"] = record.name
         message_data: Dict[str, Any] = {
             "message": record.getMessage(),
-            "parameters": {
-                "thread": record.thread,
-                "filename": record.filename,
-                "lineno": record.lineno,
-                "name": record.name,
-                "funcName": record.funcName,
-                "module": record.module,
-                "timestamp": self.formatTime(record, self.datefmt),
-            },
+            "parameters": {},
         }
+
         if hasattr(record, "params"):
             arbitrary_params = getattr(record, "params")
             if isinstance(arbitrary_params, dict):
@@ -83,6 +120,15 @@ class CustomJsonFormatter(TimeFormatterMixin, jsonlogger.JsonFormatter):
             message_data["exception"] = self.formatException(record.exc_info)
 
         custom_log_record["messageData"] = message_data
+
+        custom_log_record["ctx"] = {
+            "thread": record.thread,
+            "filename": record.filename,
+            "lineno": record.lineno,
+            "name": record.name,
+            "funcName": record.funcName,
+            "module": record.module,
+        }
 
         log_record.clear()
         log_record.update(custom_log_record)
@@ -98,7 +144,7 @@ def setup_logger(  # noqa: C901
     log_as_json: Optional[bool] = None,
     fmt: str = DEFAULT_FMT,
     datefmt: str = DEFAULT_DATE_FMT,
-) -> logging.Logger:
+) -> CustomLogger:
     if log_to_console is None:
         log_to_console = get_bool(os.environ.get("LOG_TO_CONSOLE", "1"))
     if log_to_file is None:
@@ -110,7 +156,8 @@ def setup_logger(  # noqa: C901
     if base_dir is None:
         base_dir = os.environ.get("LOG_BASE_DIR", "./logs")
     assert log_to_file or log_to_console, "logger without output is useless!"
-    _logger = logging.getLogger(logger_name)
+    logging.setLoggerClass(CustomLogger)
+    _logger: CustomLogger = logging.getLogger(logger_name)  # type: ignore
 
     if log_to_file:
         file_handlers = [
@@ -251,6 +298,9 @@ def get_bool(s: Optional[Union[str, bool]]) -> bool:
 
     Args:
         s: The string to convert.
+
+    Returns:
+        True if the string is considered True, False otherwise.
     """
     if isinstance(s, bool):
         return s
