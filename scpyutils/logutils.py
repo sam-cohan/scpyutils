@@ -3,6 +3,7 @@ Utilities for logging.
 
 Author: Sam Cohan
 """
+import json
 import logging
 import os
 import re
@@ -44,9 +45,13 @@ class CustomLogger(logging.Logger):
         elif args and isinstance(args[0], dict):
             # Assume the first arg is "params" if it's a dict and
             # "params" isn't already in kwargs
-            extra["params"] = args[0]
-            args = args[1:] if len(args) > 1 else tuple()
-
+            params = args[0]
+            extra["params"] = params
+        if isinstance(params, dict):
+            try:
+                msg = f"{msg} | PARAMS={json.dumps(params, default=lambda x: str(x))}"
+            except Exception:
+                msg = f"{msg} | PARAMS={params}"
         super()._log(level, msg, args, extra=extra, stacklevel=stacklevel, **kwargs)
 
     def info(self, msg: str, *args, **kwargs) -> None:  # type: ignore
