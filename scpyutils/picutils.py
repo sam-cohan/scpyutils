@@ -327,7 +327,7 @@ def cleaup_media_files(
     file_paths = sorted(get_all_media_file_paths(src_root_dir))
     print(f"Retrieved {len(file_paths):,.0f} media files from {src_root_dir}")
 
-    print(f"Getting metadatas for all media files...")
+    print("Getting metadatas for all media files...")
     metadatas = get_metadatas_mproc(  # pylint: disable=unexpected-keyword-arg
         file_paths=file_paths, __force_refresh=refresh_metacache
     )
