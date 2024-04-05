@@ -1,3 +1,9 @@
+"""
+Utilities related to adorning DataFrames with synthetic data.
+
+Author: Sam Cohan
+"""
+
 from datetime import datetime
 from typing import Optional, Union
 
@@ -117,7 +123,7 @@ def adorn_with_groups(
 
 def adorn_with_is_test(
     df: pd.DataFrame, test_size: Union[int, float], seed: Optional[int] = None
-):
+) -> pd.DataFrame:
     """Adorns a DataFrame with an `is_test` column
 
     Args:

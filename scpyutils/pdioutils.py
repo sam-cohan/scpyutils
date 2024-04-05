@@ -1,3 +1,8 @@
+"""
+Utilities related to Pandas I/O operations.
+
+Author: Sam Cohan
+"""
 import re
 from typing import Callable, Iterator, Optional
 
