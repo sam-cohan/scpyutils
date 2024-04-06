@@ -9,6 +9,7 @@ import time
 import faiss  # pip install faiss-cpu or pip install faiss-gpu
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 
 def compute_brute_force_neighbors(
@@ -49,10 +50,9 @@ def compute_brute_force_neighbors(
         flush=True,
     )
 
-    # Directly convert embeddings to numpy arrays
     start_time = time.time()
-    test_embeddings = np.array(index_df[embedding_fld].tolist()).astype("float32")
-    train_embeddings = np.array(query_df[embedding_fld].tolist()).astype("float32")
+    test_embeddings = np.stack(index_df[embedding_fld].to_numpy())
+    train_embeddings = np.stack(query_df[embedding_fld].to_numpy())
     convert_time = time.time() - start_time
     print(f"Conversion time: {convert_time:.2f} seconds", flush=True)
 
@@ -63,7 +63,7 @@ def compute_brute_force_neighbors(
     if distance_metric == "L2":
         index = faiss.IndexFlatL2(d)
 
-        def get_score(distance: float) -> float:
+        def get_score(distance):
             return 1 / (1 + distance)
 
     elif distance_metric == "cosine":
@@ -71,7 +71,7 @@ def compute_brute_force_neighbors(
         faiss.normalize_L2(train_embeddings)
         index = faiss.IndexFlatIP(d)
 
-        def get_score(distance: float) -> float:
+        def get_score(distance):
             return 2 - distance
 
     else:
@@ -89,24 +89,29 @@ def compute_brute_force_neighbors(
     search_time = time.time() - start_time
     print(f"Search time: {search_time:.2f} seconds", flush=True)
 
+    source_ids = index_df[encoding_hash_fld].to_numpy()
+    neighbor_ids = query_df[encoding_hash_fld].to_numpy()
+
     results_list = []
-    for i, idxs in enumerate(indices):
-        source_id = index_df.iloc[i][encoding_hash_fld]
-        for rank, train_idx in enumerate(idxs, start=1):
-            if (
-                train_idx >= 0
-            ):  # Faiss returns -1 if there are fewer than top_k neighbors
-                distance = distances[i][rank - 1]
+    for i in tqdm(range(len(indices)), desc="Building final neighbor DF ..."):
+        idxs = indices[i]
+        source_id = source_ids[i]
+        valid_mask = idxs >= 0
+        ranks = np.arange(1, top_k + 1)[valid_mask]
+        distances_i = distances[i][valid_mask]
+        neighbor_ids_i = neighbor_ids[idxs[valid_mask]]
 
-                results_list.append(
-                    {
-                        "source_id": source_id,
-                        "neighbor_id": query_df.iloc[train_idx][encoding_hash_fld],
-                        "rank": rank,
-                        "distance": distance,
-                        "score": get_score(distance),
-                    }
-                )
+        results_list.append(
+            pd.DataFrame(
+                {
+                    "source_id": source_id,
+                    "neighbor_id": neighbor_ids_i,
+                    "rank": ranks,
+                    "distance": distances_i,
+                    "score": get_score(distances_i),
+                }
+            )
+        )
 
-    results_df = pd.DataFrame(results_list)
+    results_df = pd.concat(results_list, ignore_index=True)
     return results_df
