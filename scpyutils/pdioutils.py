@@ -3,11 +3,12 @@ Utilities related to Pandas I/O operations.
 
 Author: Sam Cohan
 """
+
 import re
 from typing import Callable, Iterator, Optional
 
 import pandas as pd
-import pyarrow.parquet as pq
+from fastparquet import ParquetFile
 from tqdm.auto import tqdm
 
 
@@ -26,7 +27,7 @@ def read_parquet_in_chunks(
         file_path: The path to the Parquet file.
         read_chunk_size: The number of rows to read in each chunk.
         yield_chunk_size: The number of rows to yield in each chunk (default:
-            None, which defaults to read_chunk_size).  If set to -1, all
+            None, which defaults to read_chunk_size). If set to -1, all
             non-empty reads are yielded straight away.
         cols_pattern: Regular expression pattern to match column names to
             include (default: None, which includes all columns).
@@ -41,10 +42,9 @@ def read_parquet_in_chunks(
         filter.
     """
     # pd.options.mode.copy_on_write = True
-    parquet_file = pq.ParquetFile(file_path)
-    num_rows = parquet_file.metadata.num_rows
-    arrow_schema = parquet_file.metadata.schema.to_arrow_schema()
-    all_columns = [field.name for field in arrow_schema]
+    parquet_file = ParquetFile(file_path)
+    num_rows = parquet_file.info["rows"]
+    all_columns = parquet_file.columns
 
     if cols_pattern is None and ignore_cols_pattern is None:
         columns = all_columns
@@ -66,16 +66,14 @@ def read_parquet_in_chunks(
     with tqdm(
         total=num_rows, unit="rows", desc="Reading Parquet", dynamic_ncols=True
     ) as pbar:
-        for batch in parquet_file.iter_batches(
-            batch_size=read_chunk_size, columns=columns
-        ):
-            df = batch.to_pandas()
+        for df in parquet_file.iter_row_groups(columns=columns):
             pbar.update(len(df))
+
             if trans_func:
                 df = trans_func(df)
 
             if query is not None:
-                df = df.query(query).copy()
+                df = df.query(query)
 
             total_passed += len(df)
             pbar.set_postfix(passed=total_passed)
@@ -86,8 +84,8 @@ def read_parquet_in_chunks(
             else:
                 chunk_df = pd.concat([chunk_df, df], ignore_index=True)
                 while len(chunk_df) >= yield_chunk_size:
-                    yield chunk_df.iloc[:yield_chunk_size].copy()
-                    chunk_df = chunk_df.iloc[yield_chunk_size:].copy()
+                    yield chunk_df.iloc[:yield_chunk_size]
+                    chunk_df = chunk_df.iloc[yield_chunk_size:]
 
         if yield_chunk_size != -1 and not chunk_df.empty:
             yield chunk_df
