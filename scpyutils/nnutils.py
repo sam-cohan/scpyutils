@@ -93,7 +93,7 @@ def compute_brute_force_neighbors(
     neighbor_ids = query_df[encoding_hash_fld].to_numpy()
 
     results_list = []
-    for i in tqdm(range(len(indices)), desc="Building final neighbor DF ..."):
+    for i in tqdm(range(len(indices)), desc="Building final neighbor df"):
         idxs = indices[i]
         source_id = source_ids[i]
         valid_mask = idxs >= 0
