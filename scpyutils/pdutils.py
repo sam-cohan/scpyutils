@@ -220,7 +220,7 @@ class GenericDataMerger(DataMerger):
             return df
         # Concat sometimes messed up the types (e.g. categories may turn into string).
         # Force them back.
-        for fld, dtype in dtypes.iteritems():
+        for fld, dtype in dtypes.items():
             new_dtype = str(df[fld].dtype)
             old_dtype = str(dtype)
             if new_dtype != old_dtype:
