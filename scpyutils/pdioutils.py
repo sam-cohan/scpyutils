@@ -14,8 +14,7 @@ from tqdm.auto import tqdm
 
 def read_parquet_in_chunks(
     file_path: str,
-    read_chunk_size: int,
-    yield_chunk_size: Optional[int] = None,
+    yield_chunk_size: int = -1,
     cols_pattern: Optional[str] = None,
     ignore_cols_pattern: Optional[str] = None,
     query: Optional[str] = None,
@@ -25,10 +24,8 @@ def read_parquet_in_chunks(
 
     Args:
         file_path: The path to the Parquet file.
-        read_chunk_size: The number of rows to read in each chunk.
-        yield_chunk_size: The number of rows to yield in each chunk (default:
-            None, which defaults to read_chunk_size). If set to -1, all
-            non-empty reads are yielded straight away.
+        yield_chunk_size: The number of rows to yield in each chunk (default:-1).
+            If set to -1, all non-empty reads are yielded straight away.
         cols_pattern: Regular expression pattern to match column names to
             include (default: None, which includes all columns).
         ignore_cols_pattern: Regular expression pattern to match column names to
@@ -56,9 +53,6 @@ def read_parquet_in_chunks(
 
         if ignore_cols_pattern is not None:
             columns = [col for col in columns if not re.match(ignore_cols_pattern, col)]
-
-    if yield_chunk_size is None:
-        yield_chunk_size = read_chunk_size
 
     total_passed = 0
     chunk_df = pd.DataFrame()
