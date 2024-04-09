@@ -51,12 +51,12 @@ def compute_brute_force_neighbors(
     )
 
     start_time = time.time()
-    test_embeddings = np.stack(index_df[embedding_fld].to_numpy())
-    train_embeddings = np.stack(query_df[embedding_fld].to_numpy())
+    index_embeddings = np.stack(index_df[embedding_fld].to_numpy())
+    query_embeddings = np.stack(query_df[embedding_fld].to_numpy())
     convert_time = time.time() - start_time
     print(f"Conversion time: {convert_time:.2f} seconds", flush=True)
 
-    d = test_embeddings.shape[1]
+    d = query_embeddings.shape[1]
 
     # Faiss index selection based on the distance metric
     # https://opensearch.org/docs/latest/search-plugins/knn/knn-score-script/#spaces
@@ -67,8 +67,7 @@ def compute_brute_force_neighbors(
             return 1 / (1 + distance)
 
     elif distance_metric == "cosine":
-        faiss.normalize_L2(test_embeddings)
-        faiss.normalize_L2(train_embeddings)
+        faiss.normalize_L2(index_embeddings)
         index = faiss.IndexFlatIP(d)
 
         def get_score(distance):
@@ -79,39 +78,37 @@ def compute_brute_force_neighbors(
 
     start_time = time.time()
     print("Creating index...", flush=True)
-    index.add(train_embeddings)
+    index.add(index_embeddings)
     index_time = time.time() - start_time
     print(f"Index creation time: {index_time:.2f} seconds", flush=True)
 
     start_time = time.time()
     print("Searching...", flush=True)
-    distances, indices = index.search(test_embeddings, top_k)
+    distances, indices = index.search(query_embeddings, top_k)
     search_time = time.time() - start_time
     print(f"Search time: {search_time:.2f} seconds", flush=True)
 
-    source_ids = index_df[encoding_hash_fld].to_numpy()
-    neighbor_ids = query_df[encoding_hash_fld].to_numpy()
-
     results_list = []
-    for i in tqdm(range(len(indices)), desc="Building final neighbor df"):
-        idxs = indices[i]
-        source_id = source_ids[i]
-        valid_mask = idxs >= 0
-        ranks = np.arange(1, top_k + 1)[valid_mask]
-        distances_i = distances[i][valid_mask]
-        neighbor_ids_i = neighbor_ids[idxs[valid_mask]]
-
-        results_list.append(
-            pd.DataFrame(
+    for query_idx, neighbor_idxs in tqdm(
+        enumerate(indices), total=len(indices), desc="Building neighbors"
+    ):
+        source_id = query_df.iloc[query_idx][encoding_hash_fld]
+        # source_embedding = query_embeddings[query_idx]
+        results_list.extend(
+            [
                 {
                     "source_id": source_id,
-                    "neighbor_id": neighbor_ids_i,
-                    "rank": ranks,
-                    "distance": distances_i,
-                    "score": get_score(distances_i),
+                    "neighbor_id": index_df.iloc[neighbor_idx][encoding_hash_fld],
+                    "rank": rank,
+                    "distance": distances[query_idx][rank - 1],
+                    # "distance": np.sqrt(distances[query_idx][rank-1]),
+                    # "distance_": np.linalg.norm(
+                    #     source_embedding - index_embeddings[neighbor_idx]),
                 }
-            )
+                for rank, neighbor_idx in enumerate(neighbor_idxs, start=1)
+                if neighbor_idx >= 0
+            ]
         )
-
-    results_df = pd.concat(results_list, ignore_index=True)
+    results_df = pd.DataFrame(results_list)
+    results_df["score"] = get_score(results_df["distance"])
     return results_df
