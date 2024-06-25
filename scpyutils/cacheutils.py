@@ -11,7 +11,7 @@ import os
 import re
 import time
 from functools import wraps
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Hashable, Optional, Union
 
 import dill
 import joblib
@@ -139,10 +139,10 @@ class HashSafeWrapper:
         else:
             self.__name__ = self._name
 
-    def __hash__(self):
+    def __hash__(self) -> str:  # type: ignore
         return self.__hash_override__
 
-    def override_hash(self, hash_: str):
+    def override_hash(self, hash_: str) -> "HashSafeWrapper":
         self.__hash_override__ = hash_
         if self._obj_type in self.KNOWN_TYPES:
             hash_in_name = f" src_hash:{hash_[:16]}" if self._strict else ""
@@ -150,13 +150,13 @@ class HashSafeWrapper:
         return self
 
     @property
-    def obj(self):
+    def obj(self) -> Any:
         return self._obj
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._obj(*args, **kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.__name__
 
     __repr__ = __str__
@@ -166,7 +166,7 @@ def wrap_for_memorize(
     strict: bool = True,
     hash_salt: Optional[Any] = None,
     hash_override: Optional[str] = None,
-):
+) -> Callable[[Any], HashSafeWrapper]:
     """Decorator generator for making an object hashable for use with memorize.
 
     Args:
@@ -182,8 +182,7 @@ def wrap_for_memorize(
        Decorator generator function that is safe to be used as argument to `memorize`d
        function.
     """
-
-    def wrap_for_memorize(func):
+    def wrap_for_memorize(func: Callable) -> HashSafeWrapper:
         return HashSafeWrapper(
             obj=func,
             strict=strict,
@@ -198,7 +197,7 @@ def memorize(  # noqa=C901
     local_dir: str,
     s3_dir: Optional[str] = None,
     save_metadata: bool = True,
-    kwargs_formatters: List[Tuple[str, Callable[[Any], str]]] = None,
+    kwargs_formatters: Optional[list[tuple[str, Callable[[Any], str]]]] = None,
     func_name_override: Optional[str] = None,
     num_args_to_ignore: int = 0,
     create_local_dir: bool = True,
@@ -209,8 +208,8 @@ def memorize(  # noqa=C901
     dump_format: str = "joblib",
     save_func: Optional[Callable[[Any, str], bool]] = None,
     load_func: Optional[Callable[[str], Any]] = None,
-    logger: Union[logging.Logger, Callable[[str], None]] = None,
-):
+    logger: Optional[Union[logging.Logger, Callable[[str], None]]] = None,
+) -> Callable[[Callable], Callable]:
     """Decorator for persisting results of generic functions. Note that the decorated
     function will accept the following special arguments starting with two and three
     underscores, the ones with three underscores will be not be passed to the
@@ -229,7 +228,7 @@ def memorize(  # noqa=C901
     __local_dir (str): override for `local_dir`.
     __s3_dir (Optional[str]): override for `s3_dir`.
     __save_metadata (bool): override for `save_metadata`.
-    __kwargs_formatters (List[Tuple[str, Callable]]): override for
+    __kwargs_formatters (list[Tuple[str, Callable]]): override for
         `kwargs_formatters`.
     __num_args_to_ignore (int): override for `num_args_to_ignore`.
     __func_name_override (Optional[str]): override for `func_name_override`.
@@ -275,11 +274,11 @@ def memorize(  # noqa=C901
         logger: logging.Logger object, print, or any other logging function.
     """
 
-    def memorize_(func):
+    def memorize_(func: Callable) -> Callable:
         func_src_hash = getattr(func, "__hash_override__", None)
         if func_src_hash is None:
             func_src_hash = get_hash(func)[:hash_len]
-        _metadata = {}
+        _metadata: dict[str, Any] = {}
         if save_metadata:
             _metadata["source"] = inspect.getsource(func)
             _metadata["hash_len"] = hash_len
@@ -310,7 +309,7 @@ def memorize(  # noqa=C901
         )
 
         @wraps(func)
-        def memorize__(*args, **kwargs):
+        def memorize__(*args: Any, **kwargs: Any) -> Any:
             _ignore_cache = kwargs.pop(
                 "___ignore_cache", kwargs.get("__ignore_cache", False)
             )
@@ -431,10 +430,7 @@ def memorize(  # noqa=C901
             _remaining_kwargs_hash = (
                 get_hash(_kwargs_in_hash)[:hash_len] if _kwargs_in_hash else ""
             )
-            if _func_name_override is None:
-                _func_name = func.__name__
-            else:
-                _func_name = func_name_override
+            _func_name: str = _func_name_override or func.__name__
             if _file_ext is None:
                 _file_ext = _dump_format
             _file_ext = f".{_file_ext}"
@@ -524,7 +520,7 @@ def memorize(  # noqa=C901
                     f"Loading from cache file: '{_local_path}' ..."
                 )
                 if _load_func:
-                    res = load_func(_local_path)
+                    res = _load_func(_local_path)
                 elif _dump_format in {"parquet", "csv"}:
                     res = getattr(pd, f"read_{_dump_format}")(_local_path)
                 elif _dump_format == "dill":
@@ -639,22 +635,21 @@ def memorize(  # noqa=C901
             _out_dict["s3_metadata_path"] = _s3_metadata_path
 
             return res
-
-        memorize__.__hash_override__ = func_src_hash
+        setattr(memorize__, "__hash_override__", func_src_hash)
         return memorize__
 
     return memorize_
 
 
-def memoize(func):
+def memoize(func: Callable) -> Callable:
     """Decorator for caching results of generic function in memory."""
-    _cached_results_ = {}
+    _cached_results_: dict[str, Any] = {}
     hash_override = getattr(func, "__hash_override__", None)
     if hash_override is None:
         hash_override = get_hash(func)
 
     @wraps(func)
-    def memoized(*args, **kwargs):
+    def memoized(*args: Any, **kwargs: Any) -> Any:
         _cache_key = get_hash((args, kwargs))
         try:
             res = _cached_results_[_cache_key]
@@ -663,24 +658,24 @@ def memoize(func):
             _cached_results_[_cache_key] = res
         return res
 
-    memoized._cached_results_ = _cached_results_  # pylint: disable=protected-access
-    memoized.__hash_override__ = hash_override
+    setattr(memoized, "_cached_results_", _cached_results_)
+    setattr(memoized, "__hash_override__", hash_override)
 
     return memoized
 
 
-def memoize_with_hashable_args(func):
+def memoize_with_hashable_args(func: Callable) -> Callable:
     """Decorator for fast caching of functions which have hashable args.
     Note that it will convert np.NaN to None for caching to avoid this common
     case causing a cache miss.
     """
-    _cached_results_ = {}
+    _cached_results_: dict[Hashable, Any] = {}
     hash_override = getattr(func, "__hash_override__", None)
     if hash_override is None:
         hash_override = get_hash(func)
 
     @wraps(func)
-    def memoized(*args):
+    def memoized(*args: Any) -> Any:
         try:
             lookup_args = tuple(x if pd.notnull(x) else None for x in args)
             res = _cached_results_[lookup_args]
@@ -689,7 +684,7 @@ def memoize_with_hashable_args(func):
             _cached_results_[lookup_args] = res
         return res
 
-    memoized._cached_results_ = _cached_results_  # pylint: disable=protected-access
-    memoized.__hash_override__ = hash_override
+    setattr(memoized, "_cached_results_", _cached_results_)
+    setattr(memoized, "__hash_override__", hash_override)
 
     return memoized
