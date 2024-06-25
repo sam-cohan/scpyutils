@@ -3,6 +3,7 @@ Utilities related to caching function results.
 
 Author: Sam Cohan
 """
+
 import datetime
 import hashlib
 import inspect
@@ -182,6 +183,7 @@ def wrap_for_memorize(
        Decorator generator function that is safe to be used as argument to `memorize`d
        function.
     """
+
     def wrap_for_memorize(func: Callable) -> HashSafeWrapper:
         return HashSafeWrapper(
             obj=func,
@@ -400,12 +402,14 @@ def memorize(  # noqa=C901
 
             _args_str = "__".join(
                 [
-                    x.strftime("%Y%m%d_%H%M%S")
-                    if isinstance(x, datetime.datetime)
-                    else (
-                        "_".join([str(xx) for xx in x])
-                        if isinstance(x, (list, tuple))
-                        else str(x)
+                    (
+                        x.strftime("%Y%m%d_%H%M%S")
+                        if isinstance(x, datetime.datetime)
+                        else (
+                            "_".join([str(xx) for xx in x])
+                            if isinstance(x, (list, tuple))
+                            else str(x)
+                        )
                     )
                     for x in args[_num_args_to_ignore:]
                 ]
@@ -635,6 +639,7 @@ def memorize(  # noqa=C901
             _out_dict["s3_metadata_path"] = _s3_metadata_path
 
             return res
+
         setattr(memorize__, "__hash_override__", func_src_hash)
         return memorize__
 

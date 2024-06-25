@@ -11,6 +11,7 @@ pip install exifread pandas Pillow piexif pyheif reverse_geocode tqdm
 
 Author: Sam Cohan
 """
+
 import datetime
 import hashlib
 import json

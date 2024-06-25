@@ -159,15 +159,17 @@ def try_fmt_num(
         dps = (
             0
             if abs(x - int(x)) < 1e-20
-            else 4
-            if abs_x < 1
-            else 3
-            if abs_x < 10
-            else 2
-            if abs_x < 100
-            else 1
-            if abs_x < 1000
-            else 0
+            else (
+                4
+                if abs_x < 1
+                else 3
+                if abs_x < 10
+                else 2
+                if abs_x < 100
+                else 1
+                if abs_x < 1000
+                else 0
+            )
         )
         if full_precision or abs_x < 1000:
             return ("{:,.%sf}" % dps).format(x)

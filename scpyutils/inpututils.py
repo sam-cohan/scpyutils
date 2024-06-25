@@ -3,6 +3,7 @@ Utilities related to getting and validating user input.
 
 Author: Sam Cohan
 """
+
 import re
 from typing import Any, Callable, Iterable, Optional, Union
 
