@@ -3,6 +3,7 @@ Utilities related to persisting data to file storage.
 
 Author: Sam Cohan
 """
+
 import datetime
 import json
 import os
@@ -255,19 +256,23 @@ def list_s3_keys(
     if exc_regex:
         exc_re = re.compile(exc_regex)
     return [
-        info["Key"]
-        if not fld_regex
-        else [
-            (
-                f"{v/1048576:,.3f} MB"
-                if isinstance(v, int)
-                else v.strftime("%Y-%m-%d %H:%M:%S")
-                if isinstance(v, datetime.datetime)
-                else v
-            )
-            for k, v in info.items()
-            if re.search(fld_regex, k, re.IGNORECASE)
-        ]
+        (
+            info["Key"]
+            if not fld_regex
+            else [
+                (
+                    f"{v/1048576:,.3f} MB"
+                    if isinstance(v, int)
+                    else (
+                        v.strftime("%Y-%m-%d %H:%M:%S")
+                        if isinstance(v, datetime.datetime)
+                        else v
+                    )
+                )
+                for k, v in info.items()
+                if re.search(fld_regex, k, re.IGNORECASE)
+            ]
+        )
         for info in s3_client.list_objects(Bucket=bucket, Prefix=prefix)["Contents"]
         if (not inc_regex or inc_re.search(info["Key"]))
         and (not exc_regex or not exc_re.search(info["Key"]))

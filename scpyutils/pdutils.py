@@ -3,6 +3,7 @@ Utilities useful for data munging with pandas.
 
 Author: Sam Cohan
 """
+
 import datetime
 import math
 import re
@@ -232,9 +233,9 @@ class GenericDataMerger(DataMerger):
                 df[fld].cat.reorder_categories(
                     sorted(
                         df[fld].cat.categories,
-                        key=lambda x: str(x)
-                        if not isinstance(x, str)
-                        else " {}".format(x),
+                        key=lambda x: (
+                            str(x) if not isinstance(x, str) else " {}".format(x)
+                        ),
                     ),
                     ordered=True,
                     inplace=True,
