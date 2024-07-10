@@ -104,9 +104,7 @@ class HashSafeWrapper:
         self._obj_type = (
             "function"
             if inspect.isfunction(obj)
-            else "class"
-            if inspect.isclass(obj)
-            else "?"
+            else "class" if inspect.isclass(obj) else "?"
         )
         if self._obj_type == "function":
             self.__doc__ = obj.__doc__
@@ -646,50 +644,50 @@ def memorize(  # noqa=C901
     return memorize_
 
 
-def memoize(func: Callable) -> Callable:
-    """Decorator for caching results of generic function in memory."""
-    _cached_results_: dict[str, Any] = {}
-    hash_override = getattr(func, "__hash_override__", None)
-    if hash_override is None:
-        hash_override = get_hash(func)
+def memoize(args_are_hashable: bool = True) -> Callable[[Callable], Callable]:
+    """Decorator generator for caching results of generic function in memory.
 
-    @wraps(func)
-    def memoized(*args: Any, **kwargs: Any) -> Any:
-        _cache_key = get_hash((args, kwargs))
-        try:
-            res = _cached_results_[_cache_key]
-        except KeyError:
-            res = func(*args, **kwargs)
-            _cached_results_[_cache_key] = res
-        return res
+    Args:
+        args_are_hashable: Whether the arguments are hashable.
 
-    setattr(memoized, "_cached_results_", _cached_results_)
-    setattr(memoized, "__hash_override__", hash_override)
-
-    return memoized
-
-
-def memoize_with_hashable_args(func: Callable) -> Callable:
-    """Decorator for fast caching of functions which have hashable args.
-    Note that it will convert np.NaN to None for caching to avoid this common
-    case causing a cache miss.
+    Returns:
+        The memoize decorator.
     """
-    _cached_results_: dict[Hashable, Any] = {}
-    hash_override = getattr(func, "__hash_override__", None)
-    if hash_override is None:
-        hash_override = get_hash(func)
 
-    @wraps(func)
-    def memoized(*args: Any) -> Any:
-        try:
-            lookup_args = tuple(x if pd.notnull(x) else None for x in args)
-            res = _cached_results_[lookup_args]
-        except KeyError:
-            res = func(*args)
-            _cached_results_[lookup_args] = res
-        return res
+    def memoize_decorator(func: Callable) -> Callable:
+        """Decorator for caching results of generic function in memory.
 
-    setattr(memoized, "_cached_results_", _cached_results_)
-    setattr(memoized, "__hash_override__", hash_override)
+        Args:
+            func: The function to be memoized.
 
-    return memoized
+        Returns:
+            The memoized function.
+        """
+        _cached_results_: dict[Hashable, Any] = {}
+        hash_override = getattr(func, "__hash_override__", None)
+        if hash_override is None:
+            hash_override = get_hash(func)
+
+        @wraps(func)
+        def memoized(*args: Any, **kwargs: Any) -> Any:
+            _force_refresh = kwargs.pop("__force_refresh", False)
+            bound_args = inspect.signature(func).bind(*args, **kwargs)
+            bound_args.apply_defaults()
+            _cache_key: Hashable
+            if args_are_hashable:
+                _cache_key = tuple(bound_args.arguments.items())
+            else:
+                _cache_key = get_hash(bound_args.arguments)
+
+            if _cache_key in _cached_results_ and not _force_refresh:
+                return _cached_results_[_cache_key]
+            res = func(*bound_args.args, **bound_args.kwargs)
+            _cached_results_[_cache_key] = res
+            return res
+
+        setattr(memoized, "_cached_results_", _cached_results_)
+        setattr(memoized, "__hash_override__", hash_override)
+
+        return memoized
+
+    return memoize_decorator

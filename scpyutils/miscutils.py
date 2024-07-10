@@ -17,13 +17,33 @@ from scpyutils.logutils import setup_logger
 LOGGER = setup_logger(__name__)
 
 
-def reload_module(module_name):
+def reload_module(module_name: str) -> Any:
+    """
+    Reloads a specified module.
+
+    Args:
+        module_name: The name of the module to reload.
+
+    Returns:
+        The reloaded module.
+    """
     module = importlib.import_module(module_name)
     importlib.reload(module)
     return module
 
 
-def time_me(func, *args, **kwargs):
+def time_me(func: Callable, *args: Any, **kwargs: Any) -> Any:
+    """
+    Measures the execution time of a function.
+
+    Args:
+        func: The function to measure.
+        *args: Positional arguments to pass to the function.
+        **kwargs: Keyword arguments to pass to the function.
+
+    Returns:
+        The result of the function execution.
+    """
     func_name = get_func_name(func)
     logger = kwargs.pop("___logger", kwargs.get("__logger", LOGGER))
     getattr(logger, "debug", logger)(f"calling {func_name}...")
@@ -36,19 +56,32 @@ def time_me(func, *args, **kwargs):
     return res
 
 
-def print_len(x, logger=LOGGER):
+def print_len(x: Any, logger: Any = LOGGER) -> Any:
+    """
+    Prints the length of an iterable.
+
+    Args:
+        x: The iterable whose length is to be printed.
+        logger: The logger to use for logging. Defaults to LOGGER.
+
+    Returns:
+        The input iterable.
+    """
     getattr(logger, "debug", logger)("length is {0:,.0f}.".format(len(x)))
     return x
 
 
-def patch_instance(inst: Any, func_name: str, new_func: Callable):
-    """Allows to patch instance member functions with arbitrary ones.
+def patch_instance(inst: Any, func_name: str, new_func: Callable) -> None:
+    """
+    Allows to patch instance member functions with arbitrary ones.
 
     Args:
-        inst (Object): instance you want to monkey-patch
-        func_name (str): name of the function on the instance you want to
-            monkey-patch
-        new_func (Callable): new function to replace the old function
+        inst: Instance you want to monkey-patch.
+        func_name: Name of the function on the instance you want to monkey-patch.
+        new_func: New function to replace the old function.
+
+    Returns:
+        None
     """
     import types
 
@@ -73,20 +106,24 @@ def retry(
     wait_secs: int = 5,
     raise_on_fail: bool = True,
     res_on_fail: Any = None,
-) -> Any:
-    """Decorator for allowing a function to retry
+) -> Callable:
+    """
+    Decorator for allowing a function to retry.
 
     Args:
-        max_tries: Maximum number of attempts to call the function. (default: 1)
-        wait_secs: time to wait between failures in seconds. (default: 5)
-        raise_on_fail: Whether to raise if all attempts fail (default: True)
-        res_on_fail: value to return in case of failure (default: None). Obviously,
-            this only makes sense when raise_on_fail is set to False.
+        max_tries: Maximum number of attempts to call the function. Defaults to 3.
+        wait_secs: Time to wait between failures in seconds. Defaults to 5.
+        raise_on_fail: Whether to raise if all attempts fail. Defaults to True.
+        res_on_fail: Value to return in case of failure. Defaults to None. This only
+            makes sense when raise_on_fail is set to False.
+
+    Returns:
+        The decorated function.
     """
 
-    def retry_(func):
+    def retry_(func: Callable) -> Callable:
         @wraps(func)
-        def retry_func(*args, **kwargs):
+        def retry_func(*args: Any, **kwargs: Any) -> Any:
             tries = 0
             while True:
                 try:
@@ -110,46 +147,51 @@ def retry(
 
 
 def diff_rec(
-    left: Union[dict, Iterable],
-    right: Union[dict, Iterable],
+    left: Union[Dict, Iterable],
+    right: Union[Dict, Iterable],
     ignore_keys: Optional[set] = None,
     comp_mode: str = "dp",
     precision: int = 6,
-) -> Union[Dict, Tuple]:
-    """Returns diff of two dictionaries (or non-string iterables).
+) -> Union[Dict[str, Any], Dict[int, Any], Tuple[Any, Any], Tuple[Any, Any, Any]]:
+    """
+    Returns diff of two dictionaries (or non-string iterables).
     It uses recursive drill down, so do not use on structures which have big depth!
 
     Args:
-        left: left dict or non-string iterable
-        right: right dict or non-string iterable
-        ignore_keys: optional set of keys to be ignored during comparison
+        left: Left dict or non-string iterable.
+        right: Right dict or non-string iterable.
+        ignore_keys: Optional set of keys to be ignored during comparison.
         comp_mode: Numerical comparison modes. Must be one of
             - sf : significant figures
             - dp : decimal places
             - pc : percentage change
-        precision: precision depending on the mode:
+        precision: Precision depending on the mode:
             if comp_mode='sf' then significant figures to round to before comparison
             if comp_mode='dp' then decimal places to round to before comparison
-            if comp_mode='pc' then percentage change required to trigger diff
+            if comp_mode='pc' then percentage change required to trigger diff.
 
     Returns:
-        diff of left and right. If left and right were dictionaries that are not
-        identical, then one or more of the followign keys will exist:
+        Diff of left and right. If left and right were dictionaries that are not
+        identical, then one or more of the following keys will exist:
             - "ValDiff": if there are keys which have value differences, then this
                 will contain a dictionary of those keys with values being tuple of
                 (left_value, right_value, diff_value) if numerical or simply
                 (left_value, right_value) if not numerical.
             - "OnlyInLeft": if there are some keys that only exist in the left, then
                 those keys and their values will appear here.
-            - "OnlyInLeft": if there are some keys that only exist in the right, then
+            - "OnlyInRight": if there are some keys that only exist in the right, then
                 those keys and their values will appear here.
     """
     if ignore_keys is None:
         ignore_keys = set()
     ignore_keys = set(ignore_keys)
 
-    def diff_rec_(left, right):
-        diffs = {}
+    def diff_rec_(
+        left: Any, right: Any
+    ) -> Union[Dict[str, Any], Dict[int, Any], Tuple[Any, Any], Tuple[Any, Any, Any]]:
+        diffs: Union[
+            Dict[str, Any], Dict[int, Any], Tuple[Any, Any], Tuple[Any, Any, Any]
+        ] = {}
         left_is_dict = isinstance(left, dict)
         right_is_dict = isinstance(right, dict)
         if left_is_dict and right_is_dict:
@@ -158,7 +200,7 @@ def diff_rec(
             shared_keys = left_keys & right_keys - ignore_keys
             only_in_left_keys = left_keys - right_keys - ignore_keys
             only_in_right_keys = right_keys - left_keys - ignore_keys
-            map_diffs = {}
+            map_diffs: Dict[str, Any] = {}
             for key in shared_keys:
                 res = diff_rec_(left[key], right[key])
                 if res:
@@ -166,14 +208,10 @@ def diff_rec(
                         map_diffs["ValDiff"] = {}
                     map_diffs["ValDiff"][key] = res
             if only_in_left_keys:
-                tmp_map = {}
-                for k in only_in_left_keys:
-                    tmp_map[k] = left[k]
+                tmp_map = {k: left[k] for k in only_in_left_keys}
                 map_diffs["OnlyInLeft"] = tmp_map
             if only_in_right_keys:
-                tmp_map = {}
-                for k in only_in_right_keys:
-                    tmp_map[k] = right[k]
+                tmp_map = {k: right[k] for k in only_in_right_keys}
                 map_diffs["OnlyInRight"] = tmp_map
             if map_diffs:
                 diffs = map_diffs
@@ -183,7 +221,7 @@ def diff_rec(
                 right, str
             )
             if left_is_iterable and right_is_iterable:
-                iterable_diffs = {}
+                iterable_diffs: Dict[int, Any] = {}
                 idx = -1
                 for item1, item2 in zip_longest(left, right):
                     idx += 1

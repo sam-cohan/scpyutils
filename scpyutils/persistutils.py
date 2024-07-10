@@ -49,7 +49,7 @@ def dump_local(
     obj: Any,
     path: str,
     dump_format: str = "joblib",
-    create_dirs=True,
+    create_dirs: bool = True,
     silent: bool = False,
     raise_on_error: bool = True,
 ) -> bool:
