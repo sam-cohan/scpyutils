@@ -4,7 +4,6 @@ Utilities related to caching function results.
 Author: Sam Cohan
 """
 
-import datetime
 import hashlib
 import inspect
 import logging
@@ -193,13 +192,12 @@ def wrap_for_memorize(
     return wrap_for_memorize
 
 
-def memorize(  # noqa=C901
+def memorize(
     local_dir: str,
     s3_dir: Optional[str] = None,
     save_metadata: bool = True,
     kwargs_formatters: Optional[list[tuple[str, Callable[[Any], str]]]] = None,
     func_name_override: Optional[str] = None,
-    num_args_to_ignore: int = 0,
     create_local_dir: bool = True,
     strict: bool = False,
     max_filename_len: int = 255,
@@ -211,67 +209,60 @@ def memorize(  # noqa=C901
     logger: Optional[Union[logging.Logger, Callable[[str], None]]] = None,
 ) -> Callable[[Callable], Callable]:
     """Decorator for persisting results of generic functions. Note that the decorated
-    function will accept the following special arguments starting with two and three
-    underscores, the ones with three underscores will be not be passed to the
-    underlying function whereas the ones with two underscores will be passed on.
+    function will accept the following special arguments starting with two underscores,
+    which will be handled internally and not passed to the underlying function, whereas
+    arguments starting with three underscores will be passed on to the function.
 
     __ignore_cache (bool): Whether to ignore the caching mechanism completely.
     __force_refresh (bool): Whether the cache should be refreshed even if it exists.
-    __raise_on_error (bool): whether error in saving cache file should raise an
+    __raise_on_error (bool): Whether error in saving cache file should raise an
         exception. (Defaults to True)
-    __raise_on_cache_miss (bool): whether cache miss should raise an exception. This
+    __raise_on_cache_miss (bool): Whether cache miss should raise an exception. This
         is often useful for debugging cache misses (Defaults to False).
-    __cache_key_prepend (str): optional string to append to the cache file name.
-    __cache_key_append (str): optional string to append to cache file name.
-    __out_dict (Optional[Dict]): A dictionary which can be passed in to be populated
+    __cache_key_prepend (str): Optional string to prepend to the cache file name.
+    __cache_key_append (str): Optional string to append to the cache file name.
+    __out_dict (Optional[dict]): A dictionary which can be passed in to be populated
         with the cache file paths.
-    __local_dir (str): override for `local_dir`.
-    __s3_dir (Optional[str]): override for `s3_dir`.
-    __save_metadata (bool): override for `save_metadata`.
-    __kwargs_formatters (list[Tuple[str, Callable]]): override for
-        `kwargs_formatters`.
-    __num_args_to_ignore (int): override for `num_args_to_ignore`.
-    __func_name_override (Optional[str]): override for `func_name_override`.
-    __strict (bool): override for `strict`.
-    __max_filename_len (int): override for `max_filename_len`.
-    __file_ext (Optional[str]): override for `file_ext`.
-    __dump_format (str): override for `dump_format`.
-    __save_func (Optional[Callable[[Any, str], bool]]): override for `save_func`.
-    __load_func (Optional[Callable[[str], Any]]): override for `load_func`.
-    __logger (logging.Logger|Callable): override for `logger`.
+    __local_dir (str): Override for `local_dir`.
+    __s3_dir (Optional[str]): Override for `s3_dir`.
+    __save_metadata (bool): Override for `save_metadata`.
+    __kwargs_formatters (list[tuple[str, Callable]]): Override for `kwargs_formatters`.
+    __func_name_override (Optional[str]): Override for `func_name_override`.
+    __strict (bool): Override for `strict`.
+    __max_filename_len (int): Override for `max_filename_len`.
+    __file_ext (Optional[str]): Override for `file_ext`.
+    __dump_format (str): Override for `dump_format`.
+    __save_func (Optional[Callable[[Any, str], bool]]): Override for `save_func`.
+    __load_func (Optional[Callable[[str], Any]]): Override for `load_func`.
+    __logger (logging.Logger | Callable[[str], None]): Override for `logger`.
 
     Args:
-        local_dir: local cache directory
-        s3_dir: path to s3 in format "s3://<bucket>/<object_prefix>"
+        local_dir: Local cache directory
+        s3_dir: Path to s3 in format "s3://<bucket>/<object_prefix>"
         save_metadata: Whether to save metadata about the function call.
-        kwargs_formatters: A list of keyword args and their value_formatter
-            functions. A value_formatter function is a function that takes the arg
-            and returns a suitable representation of it to be included in the cache
-            file name. Provide None or map to a constant to exclude arg from the
-            cache key.
-        num_args_to_ignore: number of args which will not be taken into
-            account in the creation of the cache_key. This can be useful for
-            functions where the first arguments are non-hashable accessor like a
-            session or shell, etc. (Defaults to 0).
-        create_local_dir: whether the cache directory should be created if
-            it does not exist. (Defaults to True).
-        strict: whether the cache should be invalidated when the function
-            implementation is changed. (Defaults to False).
-        func_name_override (Optional[str]): override for function name in case you
-            want a different name than the actual function name. (Defaults to None
-            and will use the actual function name).
-        max_filename_len: maximum length of the cache file name (OSX seems to not
-            like filenames that are more than 255 characters long, so tha is the
-            default). In file name is longer, the the long part will be replaced with
+        kwargs_formatters: A list of keyword args and their value_formatter functions.
+            A value_formatter function is a function that takes the arg and returns a
+            suitable representation of it to be included in the cache file name.
+            Provide None or map to a constant to exclude arg from the cache key.
+        create_local_dir: Whether the cache directory should be created if it does not
+            exist. (Defaults to True).
+        strict: Whether the cache should be invalidated when the function implementation
+            is changed. (Defaults to False).
+        func_name_override (Optional[str]): Override for function name in case you want
+            a different name than the actual function name. (Defaults to None and will
+            use the actual function name).
+        max_filename_len: Maximum length of the cache file name (OSX seems to not
+            like filenames that are more than 255 characters long, so that is the
+            default). If file name is longer, the long part will be replaced with
             a hash.
-        hash_len: length of hexadecimal hash string.
+        hash_len: Length of hexadecimal hash string.
         file_ext: File extension. (default: None and will fall back to value of
             `dump_format`)
-        dump_format: format of result if it is a DataFrame. Must be one of
+        dump_format: Format of result if it is a DataFrame. Must be one of
             {'dill', 'joblib', 'parquet', 'csv'} (default: 'joblib')
-        save_func: function that takes the result and the path and saves it.
-        load_func: function that takes the path to a result and loads it.
-        logger: logging.Logger object, print, or any other logging function.
+        save_func: Function that takes the result and the path and saves it.
+        load_func: Function that takes the path to a result and loads it.
+        logger: Logging.Logger object, print, or any other logging function.
     """
 
     def memorize_(func: Callable) -> Callable:
@@ -283,363 +274,247 @@ def memorize(  # noqa=C901
             _metadata["source"] = inspect.getsource(func)
             _metadata["hash_len"] = hash_len
 
-        _special_kwargs_set = set(
-            [
-                "__ignore_cache",
-                "__force_refresh",
-                "__raise_on_error",
-                "__raise_on_cache_miss",
-                "__cache_key_append",
-                "__cache_key_prepend",
-                "__out_dict",
-                "__local_dir",
-                "__s3_dir",
-                "__save_metadata",
-                "__kwargs_formatters",
-                "__num_args_to_ignore",
-                "__func_name_override",
-                "__strict",
-                "__max_filename_len",
-                "__dump_format",
-                "__file_ext",
-                "__save_func",
-                "__load_func",
-                "__logger",
-            ]
-        )
+        _special_kwargs_set = {
+            "__ignore_cache",
+            "__force_refresh",
+            "__raise_on_error",
+            "__raise_on_cache_miss",
+            "__cache_key_append",
+            "__cache_key_prepend",
+            "__out_dict",
+            "__local_dir",
+            "__s3_dir",
+            "__save_metadata",
+            "__kwargs_formatters",
+            "__func_name_override",
+            "__strict",
+            "__max_filename_len",
+            "__dump_format",
+            "__file_ext",
+            "__save_func",
+            "__load_func",
+            "__logger",
+        }
 
         @wraps(func)
-        def memorize__(*args: Any, **kwargs: Any) -> Any:
+        def memorized(*args: Any, **kwargs: Any) -> Any:
+            # Extract special arguments (double underscores, not passed to the function)
             _ignore_cache = kwargs.pop(
-                "___ignore_cache", kwargs.get("__ignore_cache", False)
+                "__ignore_cache", kwargs.get("___ignore_cache", False)
             )
-            if _ignore_cache:
-                return func(*args, **kwargs)
-            _save_metadata = kwargs.pop(
-                "___save_metadata", kwargs.get("__save_metadata", save_metadata)
-            )
-            if _save_metadata:
-                # Opted to put this here even though it can slightly slow down cache
-                # reads because we can still gain back perf by passing override for
-                # __save_metadata=False
-                _metadata["args"] = [str(x) for x in args]
-                _metadata["kwargs"] = {k: str(v) for k, v in kwargs.items()}
-
             _force_refresh = kwargs.pop(
-                "___force_refresh", kwargs.get("__force_refresh", False)
+                "__force_refresh", kwargs.get("___force_refresh", False)
             )
             _raise_on_error = kwargs.pop(
-                "___raise_on_error", kwargs.get("__raise_on_error", False)
+                "__raise_on_error", kwargs.get("___raise_on_error", True)
             )
             _raise_on_cache_miss = kwargs.pop(
-                "___raise_on_cache_miss", kwargs.get("__raise_on_cache_miss", False)
+                "__raise_on_cache_miss", kwargs.get("___raise_on_cache_miss", False)
             )
             _cache_key_prepend = kwargs.pop(
-                "___cache_key_prepend", kwargs.get("__cache_key_prepend", "")
+                "__cache_key_prepend", kwargs.get("___cache_key_prepend", "")
             )
             _cache_key_append = kwargs.pop(
-                "___cache_key_append", kwargs.get("__cache_key_append", "")
+                "__cache_key_append", kwargs.get("___cache_key_append", "")
             )
-            _out_dict = kwargs.pop("___out_dict", kwargs.get("__out_dict", {}))
+            _out_dict = kwargs.pop("__out_dict", kwargs.get("___out_dict", {}))
             _local_dir = kwargs.pop(
-                "___local_dir", kwargs.get("__local_dir", local_dir)
+                "__local_dir", kwargs.get("___local_dir", local_dir)
             )
-            _s3_dir = kwargs.pop("___s3_dir", kwargs.get("__s3_dir", s3_dir))
+            _s3_dir = kwargs.pop("__s3_dir", kwargs.get("___s3_dir", s3_dir))
+            _save_metadata = kwargs.pop(
+                "__save_metadata", kwargs.get("___save_metadata", save_metadata)
+            )
             _kwargs_formatters = (
                 kwargs.pop(
-                    "___kwargs_formatters",
-                    kwargs.get("__kwargs_formatters", kwargs_formatters),
+                    "__kwargs_formatters",
+                    kwargs.get("___kwargs_formatters", kwargs_formatters),
                 )
-                or {}
-            )
-            _num_args_to_ignore = kwargs.pop(
-                "___num_args_to_ignore",
-                kwargs.get("__num_args_to_ignore", num_args_to_ignore),
+                or []
             )
             _func_name_override = kwargs.pop(
-                "___func_name_override",
-                kwargs.get("__func_name_override", func_name_override),
+                "__func_name_override",
+                kwargs.get("___func_name_override", func_name_override),
             )
-            _strict = kwargs.pop("___strict", kwargs.get("__strict", strict))
+            _strict = kwargs.pop("__strict", kwargs.get("___strict", strict))
             _max_filename_len = kwargs.pop(
-                "___max_filename_len",
-                kwargs.get("__max_filename_len", max_filename_len),
+                "__max_filename_len",
+                kwargs.get("___max_filename_len", max_filename_len),
             )
-            _file_ext = kwargs.pop("___file_ext", kwargs.get("__file_ext", file_ext))
+            _file_ext = kwargs.pop("__file_ext", kwargs.get("___file_ext", file_ext))
             _dump_format = kwargs.pop(
-                "___dump_format", kwargs.get("__dump_format", dump_format)
+                "__dump_format", kwargs.get("___dump_format", dump_format)
             )
             assert _dump_format in {
                 "dill",
                 "joblib",
                 "parquet",
                 "csv",
-            }, f"dump_format={dump_format} not supported!"
+            }, f"dump_format={_dump_format} not supported!"
             _save_func = kwargs.pop(
-                "___save_func", kwargs.get("__save_func", save_func)
+                "__save_func", kwargs.get("___save_func", save_func)
             )
             _load_func = kwargs.pop(
-                "___load_func", kwargs.get("__load_func", load_func)
+                "__load_func", kwargs.get("___load_func", load_func)
             )
-            _logger = kwargs.pop("___logger", kwargs.get("__logger", logger))
+            _logger = kwargs.pop("__logger", kwargs.get("___logger", logger))
             if not _logger:
                 _logger = lambda x: None  # noqa: E731
-            # Make sure we don't grab a cache file if the function does not support
-            # arbitrary keyword args and the provided arguments are not supported
-            # (could happen if you change function signature).
-            argspec = inspect.getfullargspec(func)
-            extra_kwargs = set(kwargs) - set(argspec.args)
-            if extra_kwargs and not argspec.varkw:
-                unacceptable_kwargs = extra_kwargs - _special_kwargs_set
-                if unacceptable_kwargs:
-                    raise Exception(
-                        f"Following args are not supported: {unacceptable_kwargs}"
-                    )
-                for kwarg in extra_kwargs:
-                    kwargs.pop(kwarg)
 
-            _args_str = "__".join(
-                [
-                    (
-                        x.strftime("%Y%m%d_%H%M%S")
-                        if isinstance(x, datetime.datetime)
-                        else (
-                            "_".join([str(xx) for xx in x])
-                            if isinstance(x, (list, tuple))
-                            else str(x)
-                        )
-                    )
-                    for x in args[_num_args_to_ignore:]
-                ]
-            )
-            _explicit_kwargs_str = "__".join(
-                [
-                    val_formatter(kwargs[kwarg])
-                    for kwarg, val_formatter in _kwargs_formatters
-                    if val_formatter and kwarg in kwargs
-                ]
-            )
-            remaining_kwargs = {
-                k: v for k, v in kwargs.items() if k not in dict(_kwargs_formatters)
+            bound_args = inspect.signature(func).bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            if _ignore_cache:
+                return func(*bound_args.args, **bound_args.kwargs)
+
+            all_kwargs = bound_args.arguments
+            hash_kwargs = {
+                k: v for k, v in all_kwargs.items() if k not in _special_kwargs_set
             }
-            _kwargs_in_hash = {
-                k: v
-                for k, v in remaining_kwargs.items()
-                if k not in _special_kwargs_set
-            }
+            if "kwargs" in hash_kwargs:
+                hash_kwargs.update(hash_kwargs.pop("kwargs"))
+
+            # Apply formatters to keyword arguments
+            formatted_parts = []
+            for key, formatter in _kwargs_formatters:
+                if key in hash_kwargs:
+                    if formatter is not None:
+                        formatted_parts.append(formatter(all_kwargs[key]))
+                    # Remove formatted args from hash_kwargs to exclude from hash
+                    del hash_kwargs[key]
+
+            # Generate cache key
             if _strict:
-                _kwargs_in_hash["src_hash"] = func_src_hash
-            _remaining_kwargs_hash = (
-                get_hash(_kwargs_in_hash)[:hash_len] if _kwargs_in_hash else ""
-            )
-            _func_name: str = _func_name_override or func.__name__
-            if _file_ext is None:
-                _file_ext = _dump_format
-            _file_ext = f".{_file_ext}"
-            _filename = (
-                "__".join(
-                    [
-                        str(x)
-                        for x in (
-                            [
-                                _cache_key_prepend,
-                                _func_name,
-                                _args_str,
-                                _explicit_kwargs_str,
-                                _remaining_kwargs_hash,
-                                _cache_key_append,
-                            ]
-                        )
-                        if x
+                hash_kwargs["src_hash"] = func_src_hash
+
+            _cache_key_parts = (
+                [
+                    part
+                    for part in [
+                        _cache_key_prepend,
+                        (_func_name_override or func.__name__),
                     ]
-                )
-                + _file_ext
+                    if part
+                ]
+                + formatted_parts
+                + [get_hash(hash_kwargs)]
+                + [part for part in [_cache_key_append] if part]
             )
-            if _max_filename_len and len(_filename) > _max_filename_len:
-                getattr(_logger, "warning", _logger)(
-                    f"Cache filename longer than {_max_filename_len} will be"
-                    " truncated."
+            _cache_key = "__".join(_cache_key_parts)
+            if len(_cache_key) > _max_filename_len:
+                _cache_key = (
+                    f"{_cache_key[:_max_filename_len-46]}__{get_hash(_cache_key)}"
                 )
-                _filename = (
-                    f"{_filename[:_max_filename_len - 46]}"
-                    f"__{get_hash(_filename[_max_filename_len - 46:])[:hash_len]}"
-                    f"{_file_ext}"
-                )
-            _local_path = os.path.join(_local_dir, _filename)
-            _s3_path = os.path.join(_s3_dir, _filename) if _s3_dir else None
-            _local_metadata_path = (
-                (_local_path.rsplit(".", 1)[0] + ".meta.json")
-                if _save_metadata
+
+            cache_file_path = os.path.join(
+                _local_dir, f"{_cache_key}.{_file_ext or _dump_format}"
+            )
+            s3_file_path = (
+                os.path.join(_s3_dir, f"{_cache_key}.{_file_ext or _dump_format}")
+                if _s3_dir
                 else None
             )
-            _s3_metadata_path = (
-                (_s3_path.rsplit(".", 1)[0] + ".meta.json")
-                if _s3_path and _save_metadata
-                else None
-            )
-            local_cache_exists = os.path.isfile(_local_path)
-            if not local_cache_exists and not _force_refresh:
-                getattr(_logger, "info", _logger)(
-                    f"No local cache file found at '{_local_path}'"
-                )
-                if _s3_path:
-                    s3_path_exists = pstu.exists_in_s3(_s3_path)
-                    if not s3_path_exists:
-                        getattr(_logger, "info", _logger)(
-                            f"No s3 cache file found at '{_s3_path}'"
-                        )
-                    else:
-                        getattr(_logger, "info", _logger)(
-                            "Downloading cache file from:"
-                            f" '{_s3_path}' to '{_local_path}'"
-                        )
-                        pstu.download_file_from_s3(
-                            s3_path=_s3_path,
-                            local_path=_local_path,
-                            silent=True,
-                            raise_on_error=_raise_on_error,
-                        )
-                        if _save_metadata:
-                            getattr(_logger, "info", _logger)(
-                                "Downloading meta file from:"
-                                f" '{_s3_metadata_path}' to '{_local_metadata_path}'"
-                            )
-                            try:
-                                pstu.download_file_from_s3(
-                                    s3_path=_s3_metadata_path,
-                                    local_path=_local_metadata_path,
-                                    silent=True,
-                                    raise_on_error=True,
-                                )
-                            except Exception as e:
-                                getattr(_logger, "error", _logger)(
-                                    "ERROR: Failed to download meta file from:"
-                                    f" '{_s3_metadata_path}' {e}"
-                                )
-                local_cache_exists = os.path.isfile(_local_path)
+
+            local_cache_exists = os.path.exists(cache_file_path)
+            cache_loaded = False
+
             if local_cache_exists and not _force_refresh:
-                getattr(_logger, "info", _logger)(
-                    f"Loading from cache file: '{_local_path}' ..."
-                )
-                if _load_func:
-                    res = _load_func(_local_path)
-                elif _dump_format in {"parquet", "csv"}:
-                    res = getattr(pd, f"read_{_dump_format}")(_local_path)
-                elif _dump_format == "dill":
-                    res = dill.load(open(_local_path, "rb"))
-                else:
-                    res = joblib.load(_local_path)
-            else:
-                if not local_cache_exists:
+                if _logger:
+                    _logger(f"Loading from cache file: {cache_file_path}")
+                try:
+                    if _load_func:
+                        result = _load_func(cache_file_path)
+                    elif _dump_format == "dill":
+                        with open(cache_file_path, "rb") as f:
+                            result = dill.load(f)
+                    elif _dump_format == "joblib":
+                        result = joblib.load(cache_file_path)
+                    elif _dump_format in {"parquet", "csv"}:
+                        result = (
+                            pd.read_parquet(cache_file_path)
+                            if _dump_format == "parquet"
+                            else pd.read_csv(cache_file_path)
+                        )
+                    cache_loaded = True
+                except Exception as e:
+                    if _logger:
+                        _logger(f"Cache load failed: {e}")
                     if _raise_on_cache_miss:
-                        raise Exception(f"Missing cache file: '{_local_path}'")
-                else:
-                    getattr(_logger, "info", _logger)(
-                        f"Refreshing cache file at '{_local_path}'"
-                        " by calling function ..."
-                    )
+                        raise e
+
+            if not local_cache_exists and _raise_on_cache_miss:
+                raise Exception(f"Cache file {cache_file_path} not found.")
+
+            if not cache_loaded:
                 start_time = time.time()
-                # Actually call the function!
-                res = func(*args, **kwargs)
+                result = func(*bound_args.args, **bound_args.kwargs)
                 end_time = time.time()
                 duration = end_time - start_time
-                getattr(_logger, "info", _logger)(
-                    f"Function call took {duration} seconds. "
-                    f"Saving cache file '{_local_path}' ..."
-                )
-                if create_local_dir:
-                    pstu.ensure_dirs(_local_dir, raise_on_error=False)
+
+                if create_local_dir and not os.path.exists(_local_dir):
+                    os.makedirs(_local_dir)
+                if _logger:
+                    _logger(f"Saving to cache file: {cache_file_path}")
                 try:
                     if _save_func:
-                        _save_func(res, _local_path)
-                    elif _dump_format in {"parquet", "csv"}:
-                        getattr(res, f"to_{_dump_format}")(
-                            _local_path, index=all(res.index.names)
-                        )
+                        _save_func(result, cache_file_path)
                     else:
-                        pstu.dump_local(
-                            obj=res,
-                            path=_local_path,
-                            dump_format=_dump_format,
-                            create_dirs=False,
-                            silent=True,
-                            raise_on_error=True,
-                        )
+                        if _dump_format == "dill":
+                            with open(cache_file_path, "wb") as f:
+                                dill.dump(result, f)
+                        elif _dump_format == "joblib":
+                            joblib.dump(result, cache_file_path)
+                        elif _dump_format in {"parquet", "csv"}:
+                            if _dump_format == "parquet":
+                                result.to_parquet(cache_file_path)
+                            else:
+                                result.to_csv(cache_file_path)
                 except Exception as e:
-                    getattr(_logger, "exception", _logger)(
-                        f"ERROR: failed to save cache file '{_local_path}' : {e}"
-                    )
-                    _local_path = None
+                    if _raise_on_error:
+                        raise e
+                    if _logger:
+                        _logger(f"Failed to save cache: {e}")
 
-                if _local_path and _local_metadata_path:
-                    local_vars = locals()
-                    for kwarg in _special_kwargs_set:
-                        if kwarg not in {"__logger", "__out_dict"}:
-                            _metadata[kwarg[2:]] = local_vars.get(kwarg[1:])
+                if _save_metadata:
+                    metadata_file_path = f"{cache_file_path}.meta.json"
+                    _metadata["kwargs"] = {k: str(v) for k, v in all_kwargs.items()}
+                    _metadata["result"] = str(result)
+                    _metadata["hash_components"] = list(hash_kwargs.keys())
                     _metadata["start_time"] = start_time
                     _metadata["end_time"] = end_time
                     _metadata["duration"] = duration
-                    _metadata["filename"] = _filename
-                    getattr(_logger, "info", _logger)(
-                        f"Saving metadata file to '{_local_metadata_path}' ..."
-                    )
-                    metadata_dumped = pstu.dump_local(
-                        obj=_metadata,
-                        path=_local_metadata_path,
-                        dump_format="json",
-                        create_dirs=False,
-                        silent=True,
-                        raise_on_error=_raise_on_error,
-                    )
-                    if not metadata_dumped:
-                        getattr(_logger, "error", _logger)(
-                            "ERROR: failed to save metadata file"
-                            f" '{_local_metadata_path}'"
-                        )
-                        _local_metadata_path = None
+                    pstu.dump_local(_metadata, metadata_file_path, "json")
+                    if _logger:
+                        _logger(f"Saved metadata to: {metadata_file_path}")
 
-                if _local_path and _s3_path:
-                    getattr(_logger, "info", _logger)(
-                        f"Uploading cache file from '{_local_path}'"
-                        f"to '{_s3_path}' ..."
-                    )
-                    cache_uploaded = pstu.upload_file_to_s3(
-                        local_path=_local_path,
-                        s3_path=_s3_path,
-                        silent=True,
-                        raise_on_error=_raise_on_error,
-                    )
-                    if not cache_uploaded:
-                        getattr(_logger, "error", _logger)(
-                            f"ERROR: failed to upload cache file to '{_s3_path}'"
-                        )
-                        _s3_path = None
-                if _s3_path and _local_metadata_path:
-                    getattr(_logger, "info", _logger)(
-                        f"Uploading metadata file from '{_local_metadata_path}'"
-                        f" to '{_s3_metadata_path}' ..."
-                    )
-                    metadata_uploaded = pstu.upload_file_to_s3(
-                        local_path=_local_metadata_path,
-                        s3_path=_s3_metadata_path,
-                        silent=True,
-                        raise_on_error=_raise_on_error,
-                    )
-                    if not metadata_uploaded:
-                        getattr(_logger, "error", _logger)(
-                            "ERROR: failed to upload metadata file to"
-                            f" '{_s3_metadata_path}'"
-                        )
-                        _s3_metadata_path = None
-            _out_dict["local_path"] = _local_path
-            _out_dict["local_metadata_path"] = _local_metadata_path
-            _out_dict["s3_path"] = _s3_path
-            _out_dict["s3_metadata_path"] = _s3_metadata_path
+                if _s3_dir and s3_file_path:
+                    if _logger:
+                        _logger(f"Uploading to S3: {s3_file_path}")
+                    try:
+                        pstu.upload_file_to_s3(cache_file_path, s3_file_path)
+                        if _save_metadata:
+                            s3_metadata_file_path = f"{s3_file_path}.meta.json"
+                            pstu.upload_file_to_s3(
+                                metadata_file_path, s3_metadata_file_path
+                            )
+                    except Exception as e:
+                        if _raise_on_error:
+                            raise e
+                        if _logger:
+                            _logger(f"Failed to upload to S3: {e}")
 
-            return res
+            _out_dict["local_path"] = cache_file_path
+            _out_dict["local_metadata_path"] = (
+                f"{cache_file_path}.meta.json" if _save_metadata else None
+            )
+            _out_dict["s3_path"] = s3_file_path
+            _out_dict["s3_metadata_path"] = (
+                f"{s3_file_path}.meta.json" if _s3_dir and _save_metadata else None
+            )
 
-        setattr(memorize__, "__hash_override__", func_src_hash)
-        return memorize__
+            return result
+
+        return memorized
 
     return memorize_
 
