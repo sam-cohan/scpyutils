@@ -1,5 +1,5 @@
 """
-Utilities related to persisting data to file storage.
+Utilities for persisting.
 
 Author: Sam Cohan
 """
@@ -15,6 +15,10 @@ import boto3
 import botocore
 import dill
 import joblib
+
+import scpyutils.logutils as logu
+
+LOGGER = logu.setup_logger(__name__)
 
 
 def ensure_dirs(
@@ -35,10 +39,10 @@ def ensure_dirs(
     try:
         if not os.path.exists(dir_name):
             if not silent:
-                print(f"Creating new directory {dir_name}")
+                LOGGER.warning(f"Creating new directory {dir_name}")
             os.makedirs(dir_name)
     except Exception as e:
-        print(f"ERROR: failed to create directory {dir_name}. {e}")
+        LOGGER.exception(f"ERROR: failed to create directory {dir_name}. {e}")
         if raise_on_error:
             raise e
         return False
@@ -68,7 +72,7 @@ def dump_local(
         Boolean of whether the file was successfully saved.
     """
     if not silent:
-        print(f"Writing to path={path}")
+        LOGGER.info(f"Writing to path={path}")
     dir_name = os.path.dirname(path) or "."
     try:
         if create_dirs:
@@ -84,7 +88,7 @@ def dump_local(
             temp_path = tf.name
         os.rename(temp_path, path)
     except Exception as e:
-        print(f"ERROR: failed to save file {path}: {e}")
+        LOGGER.exception(f"ERROR: failed to save file {path}: {e}")
         if raise_on_error:
             raise e
         return False
@@ -135,10 +139,12 @@ def upload_file_to_s3(
     s3_client = boto3.client("s3")
     try:
         if not silent:
-            print(f"Uploading file from '{local_path}' to '{s3_path}'")
+            LOGGER.info(f"Uploading file from '{local_path}' to '{s3_path}'")
         s3_client.upload_file(local_path, bucket, key, **boto3_kwargs)
     except Exception as e:
-        print(f"ERROR: failed to upload from '{local_path}' to '{s3_path}': {e}")
+        LOGGER.exception(
+            f"ERROR: failed to upload from '{local_path}' to '{s3_path}': {e}"
+        )
         if raise_on_error:
             raise e
         return False
@@ -172,7 +178,7 @@ def download_file_from_s3(
     s3_client = boto3.client("s3")
     try:
         if not silent:
-            print(f"Downloading file from '{s3_path}' to '{local_path}'")
+            LOGGER.info(f"Downloading file from '{s3_path}' to '{local_path}'")
         dir_name = os.path.dirname(local_path)
         if create_dirs:
             ensure_dirs(dir_name, silent=silent)
@@ -181,7 +187,9 @@ def download_file_from_s3(
             temp_path = tf.name
         os.rename(temp_path, local_path)
     except Exception as e:
-        print(f"ERROR: failed to download from {s3_path} to {local_path}: {e}")
+        LOGGER.exception(
+            f"ERROR: failed to download from {s3_path} to {local_path}: {e}"
+        )
         if raise_on_error:
             raise e
         return False
@@ -204,7 +212,7 @@ def exists_in_s3(s3_path: str) -> Optional[bool]:
     except botocore.exceptions.ClientError:
         return False
     except Exception as e:
-        print(
+        LOGGER.exception(
             f"ERROR: unexpected exception checking existence of s3_path={s3_path}"
             f": {e}"
         )
@@ -225,8 +233,8 @@ def delete_from_s3(s3_path: str) -> bool:
     s3_client = boto3.client("s3")
     try:
         s3_client.delete_object(Bucket=bucket, Key=key)
-    except Exception as e:
-        print(f"ERROR: unexpected exception deletion of s3_path={s3_path}: {e}")
+    except Exception:
+        LOGGER.exception(f"ERROR: unexpected exception deletion of s3_path={s3_path}")
         return False
     return True
 

@@ -89,7 +89,7 @@ def patch_instance(inst: Any, func_name: str, new_func: Callable) -> None:
         # in python 2.7 this was .im_self
         self = getattr(inst, func_name).__self__
     except AttributeError:
-        print("WARNING: %s does not exist... will add it!" % func_name)
+        LOGGER.warning(f"WARNING: {func_name} does not exist... will add it!")
         # try to get the self from any arbitrary method on the instance
         self = [
             getattr(inst, x).__self__
@@ -130,15 +130,17 @@ def retry(
                     return func(*args, **kwargs)
                 except Exception as e:
                     tries += 1
-                    print(f"ERROR: attempt={tries} failed in calling {func}: {e}")
+                    LOGGER.exception(
+                        f"ERROR: attempt={tries} failed in calling {func}: {e}"
+                    )
                     if tries >= max_tries:
-                        print(f"Max tries={max_tries} reached for {func}.")
+                        LOGGER.error(f"Max tries={max_tries} reached for {func}.")
                         if raise_on_fail:
                             raise e
                         else:
                             break
                     time.sleep(wait_secs)
-                    print(f"Retrying to call {func}")
+                    LOGGER.warning(f"Retrying to call {func}")
             return res_on_fail
 
         return retry_func
