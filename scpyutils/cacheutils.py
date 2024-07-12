@@ -20,26 +20,6 @@ import pandas as pd
 import scpyutils.persistutils as pstu
 
 
-def get_func_name(func: Callable, include_module: bool = True) -> str:
-    module_name = ""
-    module = inspect.getmodule(func)
-    if include_module and module is not None:
-        module_name = f"{module.__name__}."
-    func_name = ""
-    try:
-        func_name = func.__name__
-    except:  # noqa=E772
-        try:
-            func_name = re.search(  # type: ignore
-                "function ([^ .]+)(at 0x[0-f]+)?", str(func)
-            ).groups()[0]
-        except:  # noqa=E772
-            func_name = str(func)
-    if func_name == "<lambda>":
-        raise ValueError("lambda function does not have a name")
-    return f"{module_name}{func_name}"
-
-
 def get_hash(x: Any) -> str:
     hash_override = getattr(x, "__hash_override__", "")
     if hash_override:
@@ -477,9 +457,12 @@ def memorize(
 
                 if _save_metadata:
                     metadata_file_path = f"{cache_file_path}.meta.json"
-                    _metadata["kwargs"] = {k: str(v) for k, v in all_kwargs.items()}
-                    _metadata["result"] = str(result)
-                    _metadata["hash_components"] = list(hash_kwargs.keys())
+                    _metadata["kwargs"] = {
+                        k: get_short_str(v, max_len=256) for k, v in all_kwargs.items()
+                    }
+                    _metadata["hash_kwargs"] = {
+                        k: get_short_str(v, max_len=256) for k, v in hash_kwargs.items()
+                    }
                     _metadata["start_time"] = start_time
                     _metadata["end_time"] = end_time
                     _metadata["duration"] = duration
@@ -566,3 +549,50 @@ def memoize(args_are_hashable: bool = True) -> Callable[[Callable], Callable]:
         return memoized
 
     return memoize_decorator
+
+
+def get_func_name(func: Callable, include_module: bool = True) -> str:
+    module_name = ""
+    module = inspect.getmodule(func)
+    if include_module and module is not None:
+        module_name = f"{module.__name__}."
+    func_name = ""
+    try:
+        func_name = func.__name__
+    except:  # noqa=E772
+        try:
+            func_name = re.search(  # type: ignore
+                "function ([^ .]+)(at 0x[0-f]+)?", str(func)
+            ).groups()[0]
+        except:  # noqa=E772
+            func_name = str(func)
+    if func_name == "<lambda>":
+        raise ValueError("lambda function does not have a name")
+    return f"{module_name}{func_name}"
+
+
+def get_short_str(x: Any, max_len: int = 100) -> str:
+    """Get a shortened string representation of any object.
+
+    If the length of `x` is less than `max_len`, it is returned as is.
+    If it is more, it is truncated to fit the format:
+    "<first_part> ... <second_part>" where the length is equal to `max_len`.
+
+    Args:
+        x: The input object to be shortened.
+        max_len: The maximum allowed length for the output string. Defaults to 100.
+
+    Returns:
+        A string representation of `x` shortened to `max_len` characters if necessary.
+    """
+    str_x = str(x)
+    if len(str_x) <= max_len:
+        return str_x
+
+    part_len = (
+        max_len - 5
+    ) // 2  # Length of each part, 5 characters are reserved for " ... "
+    first_part = str_x[:part_len]
+    second_part = str_x[-part_len:]
+
+    return f"{first_part} ... {second_part}"
