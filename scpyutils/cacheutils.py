@@ -349,7 +349,9 @@ def memorize(
 
             all_kwargs = bound_args.arguments
             hash_kwargs = {
-                k: v for k, v in all_kwargs.items() if k not in _special_kwargs_set
+                k: v
+                for k, v in all_kwargs.items()
+                if (k not in _special_kwargs_set) and (k[1:] not in _special_kwargs_set)
             }
             if "kwargs" in hash_kwargs:
                 hash_kwargs.update(hash_kwargs.pop("kwargs"))
