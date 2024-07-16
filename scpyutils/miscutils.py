@@ -10,145 +10,13 @@ from functools import wraps
 from itertools import zip_longest
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union
 
-import scpyutils.formatutils as fmtu
 from scpyutils.cacheutils import get_func_name
 from scpyutils.logutils import setup_logger
 
 LOGGER = setup_logger(__name__)
 
 
-def reload_module(module_name: str) -> Any:
-    """
-    Reloads a specified module.
-
-    Args:
-        module_name: The name of the module to reload.
-
-    Returns:
-        The reloaded module.
-    """
-    module = importlib.import_module(module_name)
-    importlib.reload(module)
-    return module
-
-
-def time_me(func: Callable, *args: Any, **kwargs: Any) -> Any:
-    """
-    Measures the execution time of a function.
-
-    Args:
-        func: The function to measure.
-        *args: Positional arguments to pass to the function.
-        **kwargs: Keyword arguments to pass to the function.
-
-    Returns:
-        The result of the function execution.
-    """
-    func_name = get_func_name(func)
-    logger = kwargs.pop("___logger", kwargs.get("__logger", LOGGER))
-    getattr(logger, "debug", logger)(f"calling {func_name}...")
-    start = time.time()
-    res = func(*args, **kwargs)
-    end = time.time()
-    getattr(logger, "debug", logger)(
-        f"{func_name} took {fmtu.try_fmt_timedelta(end-start, unit='s')}."
-    )
-    return res
-
-
-def print_len(x: Any, logger: Any = LOGGER) -> Any:
-    """
-    Prints the length of an iterable.
-
-    Args:
-        x: The iterable whose length is to be printed.
-        logger: The logger to use for logging. Defaults to LOGGER.
-
-    Returns:
-        The input iterable.
-    """
-    getattr(logger, "debug", logger)("length is {0:,.0f}.".format(len(x)))
-    return x
-
-
-def patch_instance(inst: Any, func_name: str, new_func: Callable) -> None:
-    """
-    Allows to patch instance member functions with arbitrary ones.
-
-    Args:
-        inst: Instance you want to monkey-patch.
-        func_name: Name of the function on the instance you want to monkey-patch.
-        new_func: New function to replace the old function.
-
-    Returns:
-        None
-    """
-    import types
-
-    try:
-        # in python 2.7 this was .im_self
-        self = getattr(inst, func_name).__self__
-    except AttributeError:
-        LOGGER.warning(f"WARNING: {func_name} does not exist... will add it!")
-        # try to get the self from any arbitrary method on the instance
-        self = [
-            getattr(inst, x).__self__
-            for x in dir(inst)
-            if isinstance(getattr(inst, x), types.MethodType)
-        ][0]
-    inst.__dict__[func_name] = types.MethodType(
-        new_func, self
-    )  # in python 2.7 this needed inst.__class__
-
-
-def retry(
-    max_tries: int = 3,
-    wait_secs: int = 5,
-    raise_on_fail: bool = True,
-    res_on_fail: Any = None,
-) -> Callable:
-    """
-    Decorator for allowing a function to retry.
-
-    Args:
-        max_tries: Maximum number of attempts to call the function. Defaults to 3.
-        wait_secs: Time to wait between failures in seconds. Defaults to 5.
-        raise_on_fail: Whether to raise if all attempts fail. Defaults to True.
-        res_on_fail: Value to return in case of failure. Defaults to None. This only
-            makes sense when raise_on_fail is set to False.
-
-    Returns:
-        The decorated function.
-    """
-
-    def retry_(func: Callable) -> Callable:
-        @wraps(func)
-        def retry_func(*args: Any, **kwargs: Any) -> Any:
-            tries = 0
-            while True:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    tries += 1
-                    LOGGER.exception(
-                        f"ERROR: attempt={tries} failed in calling {func}: {e}"
-                    )
-                    if tries >= max_tries:
-                        LOGGER.error(f"Max tries={max_tries} reached for {func}.")
-                        if raise_on_fail:
-                            raise e
-                        else:
-                            break
-                    time.sleep(wait_secs)
-                    LOGGER.warning(f"Retrying to call {func}")
-            return res_on_fail
-
-        return retry_func
-
-    return retry_
-
-
-def diff_rec(
+def diff_rec(  # noqa: C901
     left: Union[Dict, Iterable],
     right: Union[Dict, Iterable],
     ignore_keys: Optional[set] = None,
@@ -269,3 +137,119 @@ def diff_rec(
         return diffs
 
     return diff_rec_(left, right)
+
+
+def patch_instance(inst: Any, func_name: str, new_func: Callable) -> None:
+    """
+    Allows to patch instance member functions with arbitrary ones.
+
+    Args:
+        inst: Instance you want to monkey-patch.
+        func_name: Name of the function on the instance you want to monkey-patch.
+        new_func: New function to replace the old function.
+
+    Returns:
+        None
+    """
+    import types
+
+    try:
+        # in python 2.7 this was .im_self
+        self = getattr(inst, func_name).__self__
+    except AttributeError:
+        LOGGER.warning(f"WARNING: {func_name} does not exist... will add it!")
+        # try to get the self from any arbitrary method on the instance
+        self = [
+            getattr(inst, x).__self__
+            for x in dir(inst)
+            if isinstance(getattr(inst, x), types.MethodType)
+        ][0]
+    inst.__dict__[func_name] = types.MethodType(
+        new_func, self
+    )  # in python 2.7 this needed inst.__class__
+
+
+def reload_module(module_name: str) -> Any:
+    """
+    Reloads a specified module.
+
+    Args:
+        module_name: The name of the module to reload.
+
+    Returns:
+        The reloaded module.
+    """
+    module = importlib.import_module(module_name)
+    importlib.reload(module)
+    return module
+
+
+def retry(
+    max_tries: int = 3,
+    wait_secs: int = 5,
+    raise_on_fail: bool = True,
+    res_on_fail: Any = None,
+) -> Callable:
+    """
+    Decorator for allowing a function to retry.
+
+    Args:
+        max_tries: Maximum number of attempts to call the function. Defaults to 3.
+        wait_secs: Time to wait between failures in seconds. Defaults to 5.
+        raise_on_fail: Whether to raise if all attempts fail. Defaults to True.
+        res_on_fail: Value to return in case of failure. Defaults to None. This only
+            makes sense when raise_on_fail is set to False.
+
+    Returns:
+        The decorated function.
+    """
+
+    def retry_(func: Callable) -> Callable:
+        @wraps(func)
+        def retry_func(*args: Any, **kwargs: Any) -> Any:
+            tries = 0
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    tries += 1
+                    LOGGER.exception(
+                        f"ERROR: attempt={tries} failed in calling {func}: {e}"
+                    )
+                    if tries >= max_tries:
+                        LOGGER.error(f"Max tries={max_tries} reached for {func}.")
+                        if raise_on_fail:
+                            raise e
+                        else:
+                            break
+                    time.sleep(wait_secs)
+                    LOGGER.warning(f"Retrying to call {func}")
+            return res_on_fail
+
+        return retry_func
+
+    return retry_
+
+
+def time_me(func: Callable, *args: Any, **kwargs: Any) -> Any:
+    """
+    Measures the execution time of a function.
+
+    Args:
+        func: The function to measure.
+        *args: Positional arguments to pass to the function.
+        **kwargs: Keyword arguments to pass to the function.
+
+    Returns:
+        The result of the function execution.
+    """
+    func_name = get_func_name(func)
+    logger = kwargs.pop("___logger", kwargs.get("__logger", LOGGER))
+    getattr(logger, "debug", logger)(f"calling {func_name}...")
+    start = time.time()
+    res = func(*args, **kwargs)
+    end = time.time()
+    getattr(logger, "debug", logger)(
+        f"{func_name} took {end-start:,.03f} seconds."
+    )
+    return res
