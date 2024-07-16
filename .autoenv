@@ -1,1 +1,19 @@
-pyenv activate scpyutils-env
+ENV_NAME="scpyutils-env"
+PYTHON_VERSION="3.11.6"
+install_env=`pyenv versions | grep "/$ENV_NAME"`
+if [ -z "$install_env" ]; then
+    echo "############ Installing environment ..."
+    install_python=`pyenv versions | grep $PYTHON_VERSION`
+    if [ -z "$install_python" ]; then
+        echo "######## Installing Python $PYTHON_VERSION ..."
+        pyenv install $PYTHON_VERSION
+        echo "######## ... done installing Python $PYTHON_VERSION ..."
+    fi
+    pyenv virtualenv $PYTHON_VERSION $ENV_NAME
+    echo "############ ... done installing $ENV_NAME."
+    pyenv activate $ENV_NAME
+    pip install --upgrade pip
+else
+    pyenv activate $ENV_NAME
+fi;
+
