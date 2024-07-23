@@ -23,7 +23,7 @@ def get_repo_root(start_path: Optional[str] = None) -> str:
     """Find the root of a python repository.
 
     Walks up the directory tree to find the root of the project, identified as
-    the first directory that does not contain an __init__.py file.
+    the first directory that contains a `.repo_root` or `.git` directory.
 
     Args:
         start_path: The starting path to begin the search. Defaults to the
@@ -32,13 +32,18 @@ def get_repo_root(start_path: Optional[str] = None) -> str:
     Returns:
         The path to the repo root directory.
     """
+    marker_files = [".repo_root", ".git"]
+
     if start_path is None:
         start_path = os.getcwd()
 
     current_path = start_path
 
     while True:
-        if not os.path.exists(os.path.join(current_path, "__init__.py")):
+        if any(
+            os.path.exists(os.path.join(current_path, marker))
+            for marker in marker_files
+        ):
             return current_path
 
         # Move up one directory level
@@ -51,6 +56,25 @@ def get_repo_root(start_path: Optional[str] = None) -> str:
             return current_path
 
         current_path = parent_path
+
+
+def add_repo_to_path(start_path: Optional[str] = None) -> str:
+    """Find and add the repo root to sys.path.
+
+    Args:
+        start_path: The starting path to begin the search. Defaults to the
+            current working directory.
+
+    Returns:
+        The path to the repo root directory.
+    """
+    repo_root = get_repo_root(start_path)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+        LOGGER.info(f"Added {repo_root} to sys.path")
+    else:
+        LOGGER.info(f"{repo_root} is already in sys.path")
+    return repo_root
 
 
 def add_repo_root_to_path(start_path: Optional[str] = None) -> str:

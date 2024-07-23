@@ -249,7 +249,5 @@ def time_me(func: Callable, *args: Any, **kwargs: Any) -> Any:
     start = time.time()
     res = func(*args, **kwargs)
     end = time.time()
-    getattr(logger, "debug", logger)(
-        f"{func_name} took {end-start:,.03f} seconds."
-    )
+    getattr(logger, "debug", logger)(f"{func_name} took {end-start:,.03f} seconds.")
     return res
