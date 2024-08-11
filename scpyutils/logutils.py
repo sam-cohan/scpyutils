@@ -15,12 +15,18 @@ from typing import Any, Dict, Optional, Tuple, Union
 import colorlog
 from pythonjsonlogger import jsonlogger
 
+USER_HOME = os.environ.get("HOME", os.path.expanduser("~"))
+LOGS_BASE_DIR = os.path.join(USER_HOME, "logs")
+
 DEFAULT_FMT = (
     "[%(asctime)s: %(levelname)s]"
     " %(name)s::%(filename)s::%(lineno)d"
     "::%(module)s.%(funcName)s(): %(message)s"
 )
 DEFAULT_DATE_FMT = "%Y-%m-%dT%H:%M:%S.%f%z"
+
+PARAMS_PATTERN = r" \| __params__=.*"
+PARAMS_RE = re.compile(PARAMS_PATTERN)
 
 
 # Extend the Logger class to include convenience method for params
@@ -50,9 +56,11 @@ class CustomLogger(logging.Logger):
             extra["params"] = params
         if isinstance(params, dict):
             try:
-                msg = f"{msg} | PARAMS={json.dumps(params, default=lambda x: str(x))}"
+                msg = (
+                    f"{msg} | __params__={json.dumps(params, default=lambda x: str(x))}"
+                )
             except Exception:
-                msg = f"{msg} | PARAMS={params}"
+                msg = f"{msg} | __params__={params}"
         super()._log(level, msg, args, extra=extra, stacklevel=stacklevel, **kwargs)
 
     def info(self, msg: str, *args, **kwargs) -> None:  # type: ignore
@@ -112,8 +120,11 @@ class CustomJsonFormatter(TimeFormatterMixin, jsonlogger.JsonFormatter):
         custom_log_record["timeMillis"] = int(record.created * 1000)
         custom_log_record["level"] = record.levelname
         custom_log_record["ddsource"] = record.name
+        message = record.getMessage()
+        # Remove the params from the message as they will be put on the parameters.
+        message = PARAMS_RE.sub("", message)
         message_data: Dict[str, Any] = {
-            "message": record.getMessage(),
+            "message": message,
             "parameters": {},
         }
 
@@ -146,7 +157,7 @@ def setup_logger(  # noqa: C901
     log_to_file: Optional[bool] = None,
     level: int = logging.DEBUG,
     base_dir: Optional[str] = None,
-    force_format: bool = True,
+    force_format: Optional[bool] = None,
     log_as_json: Optional[bool] = None,
     fmt: str = DEFAULT_FMT,
     datefmt: str = DEFAULT_DATE_FMT,
@@ -154,13 +165,13 @@ def setup_logger(  # noqa: C901
     if log_to_console is None:
         log_to_console = get_bool(os.environ.get("LOG_TO_CONSOLE", "1"))
     if log_to_file is None:
-        log_to_file = get_bool(os.environ.get("LOG_TO_FILE", "1"))
+        log_to_file = get_bool(os.environ.get("LOG_TO_FILE", "0"))
     if log_as_json is None:
         log_as_json = get_bool(os.environ.get("LOG_AS_JSON", "0"))
     if force_format is None:
         force_format = get_bool(os.environ.get("LOG_FORCE_FORMAT", "1"))
     if base_dir is None:
-        base_dir = os.environ.get("LOG_BASE_DIR", "./logs")
+        base_dir = os.environ.get("LOG_BASE_DIR", LOGS_BASE_DIR)
     assert log_to_file or log_to_console, "logger without output is useless!"
     logging.setLoggerClass(CustomLogger)
     _logger: CustomLogger = logging.getLogger(logger_name)  # type: ignore
@@ -176,7 +187,7 @@ def setup_logger(  # noqa: C901
             log_path = os.path.join(base_dir, logger_name + ".log")
             base_dir = os.path.dirname(log_path)
             # Create the full directory if it does not exist.
-            if not os.path.exists(base_dir):
+            if log_to_file and not os.path.exists(base_dir):
                 os.makedirs(base_dir)
             file_handler = logging.FileHandler(log_path, mode="a")
             file_handler.setLevel(logging.DEBUG)
