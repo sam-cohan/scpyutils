@@ -15,7 +15,8 @@ import scpyutils.logutils as logu
 LOGGER = logu.setup_logger(__name__)
 
 
-CONFIG_DIR_NAME = ".config"
+USER_HOME = os.environ.get("HOME", os.path.expanduser("~"))
+CONFIG_BASE_DIR = os.path.join(USER_HOME, "configs")
 CONFIG_FILE_NAME = "config.yaml"
 
 
@@ -56,25 +57,6 @@ def get_repo_root(start_path: Optional[str] = None) -> str:
             return current_path
 
         current_path = parent_path
-
-
-def add_repo_to_path(start_path: Optional[str] = None) -> str:
-    """Find and add the repo root to sys.path.
-
-    Args:
-        start_path: The starting path to begin the search. Defaults to the
-            current working directory.
-
-    Returns:
-        The path to the repo root directory.
-    """
-    repo_root = get_repo_root(start_path)
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
-        LOGGER.info(f"Added {repo_root} to sys.path")
-    else:
-        LOGGER.info(f"{repo_root} is already in sys.path")
-    return repo_root
 
 
 def add_repo_root_to_path(start_path: Optional[str] = None) -> str:
@@ -131,35 +113,35 @@ def get_package_root(proj_name: str, start_path: Optional[str] = None) -> str:
 
 def get_config_file_path(
     proj_name: str,
-    config_dir_name: str = CONFIG_DIR_NAME,
+    config_base_dir: str = CONFIG_BASE_DIR,
     config_file_name: str = CONFIG_FILE_NAME,
 ) -> str:
     """Get the config file path for the project.
 
     Args:
         proj_name: The name of the project.
-        config_dir_name: The name of the config directory. (default to
-            `CONFIG_DIR_NAME`)
+        config_base_dir: The base config directory. (default to
+            `CONFIG_BASE_DIR`)
         config_file_name: The name of the config file. (defaults to
             `CONFIG_FILE_NAME`)
 
     Returns:
         The path to the config directory.
     """
-    return os.path.join(get_package_root(proj_name), config_dir_name, config_file_name)
+    return os.path.join(config_base_dir, proj_name, config_file_name)
 
 
 def load_config(
     proj_name: str,
-    config_dir_name: str = CONFIG_DIR_NAME,
+    config_base_dir: str = CONFIG_BASE_DIR,
     config_file_name: str = CONFIG_FILE_NAME,
 ) -> dict:
     """Load the project configuration file.
 
     Args:
         proj_name: The name of the project.
-        config_dir_name: The name of the config directory. (default to
-            `CONFIG_DIR_NAME`)
+        config_base_dir: The base config directory. (default to
+            `CONFIG_BASE_DIR`)
         config_file_name: The name of the config file. (defaults to
             `CONFIG_FILE_NAME`)
 
@@ -168,7 +150,7 @@ def load_config(
     """
     config_file_path = get_config_file_path(
         proj_name=proj_name,
-        config_dir_name=config_dir_name,
+        config_base_dir=config_base_dir,
         config_file_name=config_file_name,
     )
     LOGGER.info(f"Loading config file from '{config_file_path}'")
