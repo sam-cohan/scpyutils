@@ -286,7 +286,7 @@ def memorize(  # noqa: C901
                 "__force_refresh", kwargs.get("___force_refresh", False)
             )
             _raise_on_error = kwargs.pop(
-                "__raise_on_error", kwargs.get("___raise_on_error", True)
+                "__raise_on_error", kwargs.get("___raise_on_error", False)
             )
             _raise_on_cache_miss = kwargs.pop(
                 "__raise_on_cache_miss", kwargs.get("___raise_on_cache_miss", False)
@@ -473,7 +473,14 @@ def memorize(  # noqa: C901
                 duration = end_time - start_time
 
                 if create_local_dir and not os.path.exists(_local_dir):
-                    os.makedirs(_local_dir)
+                    try:
+                        os.makedirs(_local_dir)
+                    except Exception as e:
+                        _logger(f"Failed to create cache directory: {e}")
+                        if _raise_on_error:
+                            raise e
+                        return result
+
                 _logger(f"Saving to cache file: {cache_file_path}")
                 try:
                     if _save_func:
@@ -493,6 +500,7 @@ def memorize(  # noqa: C901
                     _logger(f"Failed to save cache: {e}")
                     if _raise_on_error:
                         raise e
+                    return result
 
                 if metadata_file_path:
                     _metadata["kwargs"] = {
