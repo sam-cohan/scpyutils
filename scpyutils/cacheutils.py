@@ -20,25 +20,6 @@ import pandas as pd
 import scpyutils.persistutils as pstu
 
 
-def get_hash(x: Any) -> str:
-    hash_override = getattr(x, "__hash_override__", "")
-    if hash_override:
-        return hash_override
-    if isinstance(x, dict):
-        return get_hash(str(sorted([(k, get_hash(v)) for k, v in x.items()])))
-    if isinstance(x, set):
-        return get_hash(str(sorted([get_hash(xx) for xx in x])))
-    if isinstance(x, (list, tuple)):
-        return get_hash(str([get_hash(xx) for xx in x]))
-    if inspect.isfunction(x):
-        func_version = getattr(x, "__version__", "")
-        if func_version:
-            return get_hash((get_func_name(x), func_version))
-        # Use the name in the hash so function generators can use this effectively.
-        return get_hash((get_func_name(x), inspect.getsource(x)))
-    return hashlib.sha1(str(x).encode()).hexdigest()
-
-
 class HashSafeWrapper:
     """Class for wrapping objects to make them safe for use with memorize.
 
@@ -52,7 +33,7 @@ class HashSafeWrapper:
 
     KNOWN_TYPES = ["class", "function"]
 
-    def __init__(
+    def __init__(  # noqa: C901
         self,
         obj: Any,
         strict: bool = True,
@@ -140,6 +121,25 @@ class HashSafeWrapper:
     __repr__ = __str__
 
 
+def get_hash(x: Any) -> str:
+    hash_override = getattr(x, "__hash_override__", "")
+    if hash_override:
+        return hash_override
+    if isinstance(x, dict):
+        return get_hash(str(sorted([(k, get_hash(v)) for k, v in x.items()])))
+    if isinstance(x, set):
+        return get_hash(str(sorted([get_hash(xx) for xx in x])))
+    if isinstance(x, (list, tuple)):
+        return get_hash(str([get_hash(xx) for xx in x]))
+    if inspect.isfunction(x):
+        func_version = getattr(x, "__version__", "")
+        if func_version:
+            return get_hash((get_func_name(x), func_version))
+        # Use the name in the hash so function generators can use this effectively.
+        return get_hash((get_func_name(x), inspect.getsource(x)))
+    return hashlib.sha1(str(x).encode()).hexdigest()
+
+
 def wrap_for_memorize(
     strict: bool = True,
     hash_salt: Optional[Any] = None,
@@ -172,7 +172,7 @@ def wrap_for_memorize(
     return wrap_for_memorize
 
 
-def memorize(
+def memorize(  # noqa: C901
     local_dir: str,
     s3_dir: Optional[str] = None,
     save_metadata: bool = True,
@@ -391,18 +391,58 @@ def memorize(
             cache_file_path = os.path.join(
                 _local_dir, f"{_cache_key}.{_file_ext or _dump_format}"
             )
+            metadata_file_path = (
+                f"{cache_file_path}.meta.json" if _save_metadata else None
+            )
             s3_file_path = (
                 os.path.join(_s3_dir, f"{_cache_key}.{_file_ext or _dump_format}")
                 if _s3_dir
                 else None
             )
+            s3_metadata_file_path = (
+                f"{s3_file_path}.meta.json" if s3_file_path and _save_metadata else None
+            )
 
             local_cache_exists = os.path.exists(cache_file_path)
+            s3_cache_exists = False
+            try:
+                s3_cache_exists = s3_file_path and pstu.exists_in_s3(s3_file_path)
+            except Exception as e:
+                _logger(f"Failed to check existence of cache in s3: {e}")
+            if not local_cache_exists and s3_cache_exists:
+                if pstu.download_file_from_s3(
+                    s3_file_path,
+                    cache_file_path,
+                    silent=True,
+                    raise_on_error=False,
+                ):
+                    local_cache_exists = True
+                    _logger(
+                        f"Downloaded cache file from S3: {s3_file_path}"
+                        f" to {cache_file_path}"
+                    )
+                else:
+                    _logger(f"Failed to download cache file from S3: {s3_file_path}")
+                if s3_metadata_file_path and pstu.download_file_from_s3(
+                    s3_metadata_file_path,
+                    metadata_file_path,
+                    silent=True,
+                    raise_on_error=False,
+                ):
+                    _logger(
+                        f"Downloaded metadata file from S3: {s3_metadata_file_path}"
+                        f" to {metadata_file_path}"
+                    )
+                else:
+                    _logger(
+                        "Failed to download metadata file from S3:"
+                        f" {s3_metadata_file_path}"
+                    )
+
             cache_loaded = False
 
             if local_cache_exists and not _force_refresh:
-                if _logger:
-                    _logger(f"Loading from cache file: {cache_file_path}")
+                _logger(f"Loading from cache file: {cache_file_path}")
                 try:
                     if _load_func:
                         result = _load_func(cache_file_path)
@@ -419,8 +459,7 @@ def memorize(
                         )
                     cache_loaded = True
                 except Exception as e:
-                    if _logger:
-                        _logger(f"Cache load failed: {e}")
+                    _logger(f"Cache load failed: {e}")
                     if _raise_on_cache_miss:
                         raise e
 
@@ -435,8 +474,7 @@ def memorize(
 
                 if create_local_dir and not os.path.exists(_local_dir):
                     os.makedirs(_local_dir)
-                if _logger:
-                    _logger(f"Saving to cache file: {cache_file_path}")
+                _logger(f"Saving to cache file: {cache_file_path}")
                 try:
                     if _save_func:
                         _save_func(result, cache_file_path)
@@ -452,13 +490,11 @@ def memorize(
                             else:
                                 result.to_csv(cache_file_path)
                 except Exception as e:
+                    _logger(f"Failed to save cache: {e}")
                     if _raise_on_error:
                         raise e
-                    if _logger:
-                        _logger(f"Failed to save cache: {e}")
 
-                if _save_metadata:
-                    metadata_file_path = f"{cache_file_path}.meta.json"
+                if metadata_file_path:
                     _metadata["kwargs"] = {
                         k: get_short_str(v, max_len=256) for k, v in all_kwargs.items()
                     }
@@ -469,18 +505,25 @@ def memorize(
                     _metadata["end_time"] = end_time
                     _metadata["duration"] = duration
                     pstu.dump_local(_metadata, metadata_file_path, "json")
-                    if _logger:
-                        _logger(f"Saved metadata to: {metadata_file_path}")
+                    _logger(f"Saved metadata to: {metadata_file_path}")
 
-                if _s3_dir and s3_file_path:
-                    if _logger:
-                        _logger(f"Uploading to S3: {s3_file_path}")
+                if s3_file_path:
+                    _logger(f"Uploading to S3: {s3_file_path}")
                     try:
-                        pstu.upload_file_to_s3(cache_file_path, s3_file_path)
-                        if _save_metadata:
-                            s3_metadata_file_path = f"{s3_file_path}.meta.json"
+                        pstu.upload_file_to_s3(
+                            cache_file_path, s3_file_path, silent=True
+                        )
+                        _logger(
+                            f"Uploaded cache file from {cache_file_path}"
+                            f" to {s3_file_path}"
+                        )
+                        if s3_metadata_file_path:
                             pstu.upload_file_to_s3(
-                                metadata_file_path, s3_metadata_file_path
+                                metadata_file_path, s3_metadata_file_path, silent=True
+                            )
+                            _logger(
+                                f"Uploaded metadata file from {metadata_file_path}"
+                                f" to {s3_metadata_file_path}"
                             )
                     except Exception as e:
                         if _raise_on_error:
@@ -489,13 +532,9 @@ def memorize(
                             _logger(f"Failed to upload to S3: {e}")
 
             _out_dict["local_path"] = cache_file_path
-            _out_dict["local_metadata_path"] = (
-                f"{cache_file_path}.meta.json" if _save_metadata else None
-            )
+            _out_dict["local_metadata_path"] = metadata_file_path
             _out_dict["s3_path"] = s3_file_path
-            _out_dict["s3_metadata_path"] = (
-                f"{s3_file_path}.meta.json" if _s3_dir and _save_metadata else None
-            )
+            _out_dict["s3_metadata_path"] = s3_metadata_file_path
 
             return result
 
