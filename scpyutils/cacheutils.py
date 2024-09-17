@@ -181,7 +181,8 @@ def memorize(  # noqa: C901
     create_local_dir: bool = True,
     strict: bool = False,
     max_filename_len: int = 255,
-    hash_len: int = 16,
+    max_meta_val_len: int = 65536,
+    max_hash_len: int = 64,
     file_ext: Optional[str] = None,
     dump_format: str = "joblib",
     save_func: Optional[Callable[[Any, str], bool]] = None,
@@ -210,6 +211,8 @@ def memorize(  # noqa: C901
     __func_name_override (Optional[str]): Override for `func_name_override`.
     __strict (bool): Override for `strict`.
     __max_filename_len (int): Override for `max_filename_len`.
+    __max_meta_val_len (int): Override for `max_meta_val_len`.
+    __max_hash_len (int): Override for `max_hash_len`.
     __file_ext (Optional[str]): Override for `file_ext`.
     __dump_format (str): Override for `dump_format`.
     __save_func (Optional[Callable[[Any, str], bool]]): Override for `save_func`.
@@ -235,7 +238,8 @@ def memorize(  # noqa: C901
             like filenames that are more than 255 characters long, so that is the
             default). If file name is longer, the long part will be replaced with
             a hash.
-        hash_len: Length of hexadecimal hash string.
+        max_meta_val_len: Maximum length of metadata strings (defaults to 1024).
+        max_hash_len: Length of kwargs has in the file name (defaults to 64).
         file_ext: File extension. (default: None and will fall back to value of
             `dump_format`)
         dump_format: Format of result if it is a DataFrame. Must be one of
@@ -248,11 +252,10 @@ def memorize(  # noqa: C901
     def memorize_(func: Callable) -> Callable:
         func_src_hash = getattr(func, "__hash_override__", None)
         if func_src_hash is None:
-            func_src_hash = get_hash(func)[:hash_len]
+            func_src_hash = get_hash(func)[:16]
         _metadata: dict[str, Any] = {}
         if save_metadata:
             _metadata["source"] = inspect.getsource(func)
-            _metadata["hash_len"] = hash_len
 
         _special_kwargs_set = {
             "__ignore_cache",
@@ -269,6 +272,8 @@ def memorize(  # noqa: C901
             "__func_name_override",
             "__strict",
             "__max_filename_len",
+            "__max_meta_val_len",
+            "__max_hash_len",
             "__dump_format",
             "__file_ext",
             "__save_func",
@@ -278,6 +283,11 @@ def memorize(  # noqa: C901
 
         @wraps(func)
         def memorized(*args: Any, **kwargs: Any) -> Any:
+            _special_kwargs = {
+                k: v
+                for k, v in kwargs.items()
+                if (k in _special_kwargs_set) or (k[1:] in _special_kwargs_set)
+            }
             # Extract special arguments (double underscores, not passed to the function)
             _ignore_cache = kwargs.pop(
                 "__ignore_cache", kwargs.get("___ignore_cache", False)
@@ -320,6 +330,13 @@ def memorize(  # noqa: C901
             _max_filename_len = kwargs.pop(
                 "__max_filename_len",
                 kwargs.get("___max_filename_len", max_filename_len),
+            )
+            _max_meta_val_len = kwargs.pop(
+                "__max_meta_val_len",
+                kwargs.get("___max_meta_val_len", max_meta_val_len),
+            )
+            _max_hash_len = kwargs.pop(
+                "__max_hash_len", kwargs.get("___max_hash_len", max_hash_len)
             )
             _file_ext = kwargs.pop("__file_ext", kwargs.get("___file_ext", file_ext))
             _dump_format = kwargs.pop(
@@ -379,7 +396,7 @@ def memorize(  # noqa: C901
                     if part
                 ]
                 + formatted_parts
-                + [get_hash(hash_kwargs)]
+                + [get_hash(hash_kwargs)[:_max_hash_len]]
                 + [part for part in [_cache_key_append] if part]
             )
             _cache_key = "__".join(_cache_key_parts)
@@ -503,12 +520,12 @@ def memorize(  # noqa: C901
                     return result
 
                 if metadata_file_path:
+                    _metadata["special_kwargs"] = _special_kwargs
                     _metadata["kwargs"] = {
-                        k: get_short_str(v, max_len=256) for k, v in all_kwargs.items()
+                        k: get_short_str(v, max_len=_max_meta_val_len)
+                        for k, v in all_kwargs.items()
                     }
-                    _metadata["hash_kwargs"] = {
-                        k: get_short_str(v, max_len=256) for k, v in hash_kwargs.items()
-                    }
+                    _metadata["hash_kwarg_keys"] = sorted(hash_kwargs)
                     _metadata["start_time"] = start_time
                     _metadata["end_time"] = end_time
                     _metadata["duration"] = duration
