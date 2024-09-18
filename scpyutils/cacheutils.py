@@ -6,6 +6,7 @@ Author: Sam Cohan
 
 import hashlib
 import inspect
+import json
 import logging
 import os
 import re
@@ -651,7 +652,7 @@ def get_short_str(x: Any, max_len: int = 100) -> str:
     Returns:
         A string representation of `x` shortened to `max_len` characters if necessary.
     """
-    str_x = str(x)
+    str_x = json.dumps(x, default=str)
     if len(str_x) <= max_len:
         return str_x
 
@@ -662,3 +663,4 @@ def get_short_str(x: Any, max_len: int = 100) -> str:
     second_part = str_x[-part_len:]
 
     return f"{first_part} ... {second_part}"
+
