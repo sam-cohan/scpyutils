@@ -39,7 +39,7 @@ HASH_KEYS = {
     "Composite:Megapixels",
     # JPG specific tags:
     "EXIF:CreateDate",
-    "EXIF:DatetimeOriginal",
+    "EXIF:DateTimeOriginal",
     "EXIF:ModifyDate",
     "EXIF:XResolution",
     "EXIF:YResolution",
@@ -66,6 +66,21 @@ HASH_KEYS = {
 MEDIA_EXT_RE = "(arw|avi|cr2|dat|divx|gif|heic|jpe?g|mkv|mp4|mov|mpg|png|tiff?)$"
 
 MIN_DT = pd.to_datetime("2000-01-01")
+
+# Ordered by preference: capture time before file-system / edit timestamps.
+CREATE_DT_FIELDS = [
+    "EXIF:DateTimeOriginal",
+    "EXIF:CreateDate",
+    "QuickTime:MediaCreateDate",
+    "QuickTime:TrackCreateDate",
+    "QuickTime:CreateDate",
+    "RIFF:DateTimeOriginal",
+    "QuickTime:ModifyDate",
+    "EXIF:ModifyDate",
+    "File:FileModifyDate",
+]
+
+_INVALID_DT_PREFIXES = ("0000:", "0001:", "1970:01:01")
 
 
 def get_hash_from_metadata(metadata: dict):
@@ -210,35 +225,46 @@ def get_location(file_path: str) -> Optional[Tuple[str, str]]:
     return get_location_from_metadata(metadata)
 
 
-def try_get_dt(dt_str: Optional[str]) -> Optional[pd.Timestamp]:
-    if not dt_str:
+def _parse_metadata_datetime(value) -> Optional[pd.Timestamp]:
+    """Parse an ExifTool datetime value into a naive Timestamp."""
+    if value is None or value == "":
         return None
-    try:
-        return pd.to_datetime(dt_str.replace(":", "-", 2)).tz_localize(None)
-    except:  # noqa: E722
-        pass
+    if isinstance(value, pd.Timestamp):
+        dt = value
+    elif isinstance(value, datetime.datetime):
+        dt = pd.Timestamp(value)
+    elif isinstance(value, (int, float)):
+        if value <= 0:
+            return None
+        dt = pd.to_datetime(value, unit="s", utc=True)
+    else:
+        s = str(value).strip()
+        if not s or s.startswith(_INVALID_DT_PREFIXES):
+            return None
+        # ExifTool default format uses colons in the date portion: YYYY:MM:DD ...
+        if len(s) > 4 and s[4] == ":":
+            s = s.replace(":", "-", 2)
+        dt = pd.to_datetime(s, errors="coerce", utc=True)
+        if pd.isna(dt):
+            return None
+
+    if dt.tzinfo is not None:
+        dt = dt.tz_convert("UTC").tz_localize(None)
+    if dt < MIN_DT:
+        return None
+    return dt
 
 
 def get_create_dt_from_metadata(metadata: dict) -> Optional[pd.Timestamp]:
-    dts = [
-        try_get_dt(metadata.get(fld))
-        for fld in [
-            "EXIF:DateTimeOriginal",
-            "EXIF:ModifyDate",
-            "QuickTime:CreateDate",
-            "RIFF:DateTimeOriginal",
-            "File:FileModifyDate",
-        ]
-    ]
-    dts = [x for x in dts if x is not None]
-    if not dts:
-        print(f"ERROR: Failed to extract create_dt from metadata={metadata}")
-        return None
-    dt = min(dts)
-    if dt < MIN_DT:
-        print(f"ERROR: create_dt before {MIN_DT} is surely impossible")
-        return None
-    return dt
+    for fld in CREATE_DT_FIELDS:
+        dt = _parse_metadata_datetime(metadata.get(fld))
+        if dt is not None:
+            return dt
+    print(
+        "ERROR: Failed to extract create_dt from metadata; "
+        f"tried fields={CREATE_DT_FIELDS}, SourceFile={metadata.get('SourceFile')}"
+    )
+    return None
 
 
 def get_create_dt(file_path: str) -> Optional[pd.Timestamp]:
@@ -265,8 +291,10 @@ class GetMetaDatasAugmented:
         with exiftool.ExifTool() as et:
             metadatas = et.get_metadata_batch(file_paths)
         for metadata in metadatas:
-            create_dt = get_create_dt_from_metadata(metadata)
             file_path = metadata["SourceFile"]
+            create_dt = get_create_dt_from_metadata(metadata)
+            if create_dt is None:
+                create_dt = pd.Timestamp(get_file_create_date(file_path))
             base_name, ext = os.path.basename(file_path).rsplit(".", 1)
             loc = get_location_from_metadata(metadata)
             metadata["Location"] = loc
