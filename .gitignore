@@ -17,6 +17,10 @@ node_modules
 *__pycache__*
 .pytest_cache
 .mypy_cache
+.cache/
+
+# notebook checkpoints (anywhere)
+.ipynb_checkpoints/
 
 # database file
 pydex.db
