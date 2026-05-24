@@ -1,13 +1,22 @@
-"""
-This module makes use of exiftool wrapper library pyexiftool.
-Make sure the exiftool is installed and available in your PATH.
-brew install exiftool && pip install pyexiftool==0.4.13
+"""Utilities for organizing photos and videos using ExifTool metadata.
 
-You also need to install pyheif which requires to first install libheif:
-brew install libheif
+This module scans media files, extracts capture time and location, and builds
+canonical destination filenames for deduplication and library cleanup.
 
-To install requirements:
-pip install exifread pandas Pillow piexif pyheif reverse_geocode tqdm
+Dependencies:
+    ExifTool must be installed and on PATH (``brew install exiftool``).
+    Python: ``pyexiftool``, ``pandas``, ``exifread``, ``reverse_geocode``, etc.
+    Optional HEIC support: ``libheif``, ``pyheif``, ``piexif``.
+
+Capture-date extraction uses a **tiered minimum** strategy (see
+``get_create_dt_from_metadata``): among tags that mean "when was this recorded",
+the earliest valid timestamp usually reflects the true capture time because
+re-exports and re-wraps tend to push container dates *forward*, not backward.
+``ModifyDate`` and similar edit timestamps are never considered.
+
+**Timezone policy:** All capture times are normalized to **naive UTC** (including
+destination filenames). Tag offsets are converted to UTC for consistent ordering;
+we do not infer timezone from GPS or the local machine.
 
 Author: Sam Cohan
 """
@@ -67,23 +76,56 @@ MEDIA_EXT_RE = "(arw|avi|cr2|dat|divx|gif|heic|jpe?g|mkv|mp4|mov|mpg|png|tiff?)$
 
 MIN_DT = pd.to_datetime("2000-01-01")
 
-# Ordered by preference: capture time before file-system / edit timestamps.
-CREATE_DT_FIELDS = [
+# Capture-time tags: earliest valid value wins within a tier (re-exports are usually later).
+_CAPTURE_DT_FIELDS = (
     "EXIF:DateTimeOriginal",
+    "QuickTime:CreationDate",  # Apple Photos original capture (not QuickTime:CreateDate)
+    "XMP:DateTimeOriginal",
+    "RIFF:DateTimeOriginal",
+    "IPTC:DateCreated",
+    "Composite:SubSecDateTimeOriginal",
+)
+_CAPTURE_DT_SECONDARY = (
     "EXIF:CreateDate",
+    "XMP:CreateDate",
+    "PNG:CreationTime",
+)
+# Container timestamps — often rewritten on export; only used if no capture tier matches.
+_CONTAINER_DT_FIELDS = (
     "QuickTime:MediaCreateDate",
     "QuickTime:TrackCreateDate",
     "QuickTime:CreateDate",
-    "RIFF:DateTimeOriginal",
-    "QuickTime:ModifyDate",
-    "EXIF:ModifyDate",
+)
+_FILE_DT_FIELDS = (
     "File:FileModifyDate",
-]
+    "File:FileCreateDate",
+)
+_CREATE_DT_TIERS = (
+    _CAPTURE_DT_FIELDS,
+    _CAPTURE_DT_SECONDARY,
+    _CONTAINER_DT_FIELDS,
+    _FILE_DT_FIELDS,
+)
+# Suffixes for extra capture tags ExifTool may return under unfamiliar group names.
+_CAPTURE_DT_KEY_SUFFIXES = ("DateTimeOriginal", "CreationDate")
 
 _INVALID_DT_PREFIXES = ("0000:", "0001:", "1970:01:01")
 
 
-def get_hash_from_metadata(metadata: dict):
+def get_hash_from_metadata(metadata: dict) -> str:
+    """Build a short content fingerprint from stable ExifTool tags.
+
+    Uses only ``HASH_KEYS`` (dimensions, MIME type, select date/resolution fields)
+    so visually identical or duplicate exports hash the same even if filenames
+    differ. The hash is appended to destination names to disambiguate collisions
+    at the same capture second and location.
+
+    Args:
+        metadata: ExifTool metadata dict (``SourceFile`` plus group-prefixed tags).
+
+    Returns:
+        First 16 hex chars of a SHA-1 digest of sorted key/value pairs.
+    """
     hash_content = str(sorted([(k, v) for k, v in metadata.items() if k in HASH_KEYS]))
     return hashlib.sha1(hash_content.encode()).hexdigest()[:16]
 
@@ -94,7 +136,19 @@ def get_all_file_paths(
     match_case_sensitive=False,
     not_match_re=None,
     not_match_case_sensitive=False,
-):
+) -> List[str]:
+    """Walk ``root_dir`` and collect file paths matching optional regex filters.
+
+    Args:
+        root_dir: Directory tree to walk recursively.
+        match_re: If set, only paths matching this regex are included.
+        match_case_sensitive: Whether ``match_re`` is case-sensitive.
+        not_match_re: If set, paths matching this regex are excluded.
+        not_match_case_sensitive: Whether ``not_match_re`` is case-sensitive.
+
+    Returns:
+        List of absolute or relative file paths (same form as ``os.walk`` joins).
+    """
     match_re_compile = None
     not_match_re_compile = None
     if match_re:
@@ -115,24 +169,61 @@ def get_all_file_paths(
     return all_file_paths
 
 
-def get_all_media_file_paths(root_dir):
+def get_all_media_file_paths(root_dir) -> List[str]:
+    """Collect paths under ``root_dir`` for common photo/video extensions.
+
+    Args:
+        root_dir: Root directory to scan.
+
+    Returns:
+        File paths whose names match ``MEDIA_EXT_RE`` (jpg, mov, heic, etc.).
+    """
     return get_all_file_paths(root_dir, match_re=MEDIA_EXT_RE)
 
 
 def get_metadata(file_path: str) -> dict:
+    """Read all ExifTool metadata for a single file.
+
+    Prefer this over ``get_exif``; ExifTool supports many more formats (MOV,
+    HEIC, PNG, etc.) with consistent group-prefixed tag names.
+
+    Args:
+        file_path: Path to the media file.
+
+    Returns:
+        Metadata dict including ``SourceFile`` and tags like ``EXIF:DateTimeOriginal``.
+    """
     with exiftool.ExifTool() as et:
         return et.get_metadata(file_path)
 
 
 def get_metadatas(file_paths: List[str]) -> List[dict]:
+    """Read ExifTool metadata for many files in one ExifTool process.
+
+    Args:
+        file_paths: Paths to media files.
+
+    Returns:
+        List of metadata dicts in the same order as ``file_paths``.
+    """
     with exiftool.ExifTool() as et:
         return et.get_metadata_batch(file_paths)
 
 
-def get_exif(file_path):
-    """Deprecated function for getting exif from jpg and heic files.
+def get_exif(file_path) -> dict:
+    """Read EXIF from JPEG or HEIC using pure-Python libraries (deprecated).
 
-    Make use of `get_metadata` which wraps the command line exiftool.
+    Prefer ``get_metadata``, which uses ExifTool and supports the same tag
+    naming as the rest of this module.
+
+    Args:
+        file_path: Path ending in ``.jpg`` or ``.heic``.
+
+    Returns:
+        EXIF tag dict (exifread format for JPEG; piexif-derived for HEIC).
+
+    Raises:
+        Exception: If the extension is not supported.
     """
     if file_path[-4:].lower() == ".jpg":
         import exifread
@@ -155,7 +246,19 @@ def get_exif(file_path):
     raise Exception("File not supported!")
 
 
-def get_file_create_date(file_path):
+def get_file_create_date(file_path) -> datetime.datetime:
+    """Return filesystem birth time, or mtime on platforms without birth time.
+
+    Used as a last-resort capture time when ExifTool returns no usable tags
+    (e.g. screenshots or stripped metadata).
+
+    Args:
+        file_path: Path to the file.
+
+    Returns:
+        Naive UTC ``datetime`` from ``st_birthtime`` (macOS/BSD) or
+        ``st_mtime`` (Linux fallback).
+    """
     stat = os.stat(file_path)
     try:
         dt = stat.st_birthtime
@@ -163,19 +266,34 @@ def get_file_create_date(file_path):
         # We're probably on Linux. No easy way to get creation dates here,
         # so we'll settle for when its content was last modified.
         dt = stat.st_mtime
-    return datetime.datetime.fromtimestamp(dt)
+    return datetime.datetime.fromtimestamp(dt, tz=datetime.timezone.utc).replace(
+        tzinfo=None
+    )
 
 
 def _get_if_exist(data, key):
+    """Return ``data[key]`` if present, else ``None``.
+
+    Args:
+        data: Mapping (typically exifread output).
+        key: Key to look up.
+
+    Returns:
+        Value at ``key``, or ``None``.
+    """
     if key in data:
         return data[key]
     return None
 
 
-def _convert_to_degress(ratios: List[exifread.utils.Ratio]):
-    """
-    Helper function to convert the GPS coordinates stored in the EXIF
-    to degress in float format.
+def _convert_to_degress(ratios: List[exifread.utils.Ratio]) -> float:
+    """Convert EXIF GPS DMS rationals to decimal degrees.
+
+    Args:
+        ratios: Three ``exifread.utils.Ratio`` values (degrees, minutes, seconds).
+
+    Returns:
+        Signed decimal degrees (caller applies N/S/E/W ref).
     """
     d = float(ratios[0].num) / float(ratios[0].den)
     m = float(ratios[1].num) / float(ratios[1].den)
@@ -185,7 +303,14 @@ def _convert_to_degress(ratios: List[exifread.utils.Ratio]):
 
 
 def get_lat_lng_from_exif(exif) -> Optional[Tuple[float, float]]:
-    """Get latitude and longitude from exif."""
+    """Parse latitude and longitude from exifread EXIF dict.
+
+    Args:
+        exif: Output of ``exifread.process_file``.
+
+    Returns:
+        ``(lat, lng)`` in decimal degrees, or ``None`` if GPS tags are missing.
+    """
     lat = None
     lng = None
 
@@ -207,12 +332,34 @@ def get_lat_lng_from_exif(exif) -> Optional[Tuple[float, float]]:
 
 
 def get_lat_lng_from_metadata(metadata: dict) -> Optional[Tuple[float, float]]:
+    """Read GPS coordinates from ExifTool composite tags.
+
+    ExifTool pre-computes decimal lat/lng; prefer this over ``get_lat_lng_from_exif``
+    when metadata comes from ``get_metadata``.
+
+    Args:
+        metadata: ExifTool metadata dict.
+
+    Returns:
+        ``(lat, lng)`` or ``None`` if composite GPS tags are absent.
+    """
     lat = metadata.get("Composite:GPSLatitude")
     lng = metadata.get("Composite:GPSLongitude")
     return (lat, lng) if (lat and lng) else None
 
 
 def get_location_from_metadata(metadata: dict) -> str:
+    """Reverse-geocode GPS into a short location token for filenames.
+
+    Format: ``{country_code}_{city_with_underscores}`` (e.g. ``CA_Toronto``).
+    Empty string if no GPS data.
+
+    Args:
+        metadata: ExifTool metadata dict.
+
+    Returns:
+        Location token, or ``""``.
+    """
     lat_lng = get_lat_lng_from_metadata(metadata)
     if lat_lng:
         res = reverse_geocode.get(lat_lng)
@@ -220,13 +367,36 @@ def get_location_from_metadata(metadata: dict) -> str:
     return ""
 
 
-def get_location(file_path: str) -> Optional[Tuple[str, str]]:
+def get_location(file_path: str) -> str:
+    """Reverse-geocode GPS for a single file.
+
+    Args:
+        file_path: Path to the media file.
+
+    Returns:
+        Location token from ``get_location_from_metadata``, or ``""``.
+    """
     metadata = get_metadata(file_path)
     return get_location_from_metadata(metadata)
 
 
 def _parse_metadata_datetime(value) -> Optional[pd.Timestamp]:
-    """Parse an ExifTool datetime value into a naive Timestamp."""
+    """Parse one ExifTool datetime value into a naive UTC-normalized timestamp.
+
+    Handles ExifTool's ``YYYY:MM:DD HH:MM:SS`` form (colons in the date part),
+    timezone offsets, subseconds, and numeric Unix epochs. Rejects sentinel values
+    (``0000:00:00``, pre-2000) via ``_INVALID_DT_PREFIXES`` and ``MIN_DT``.
+
+    Timezone-aware values are converted to UTC then stored naive. This is the
+    module's intentional policy: one consistent clock for comparisons, tiered
+    ``min()``, and ``DestFileBase`` filenames (not local wall time at capture).
+
+    Args:
+        value: Tag value from ExifTool (str, ``Timestamp``, number, etc.).
+
+    Returns:
+        Parsed timestamp, or ``None`` if missing/invalid.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, pd.Timestamp):
@@ -255,38 +425,169 @@ def _parse_metadata_datetime(value) -> Optional[pd.Timestamp]:
     return dt
 
 
+def _collect_valid_dts(
+    metadata: dict, fields: Tuple[str, ...]
+) -> List[pd.Timestamp]:
+    """Parse and collect all valid datetimes for a fixed list of tag names.
+
+    Args:
+        metadata: ExifTool metadata dict.
+        fields: Tag names to read (e.g. ``_CAPTURE_DT_FIELDS``).
+
+    Returns:
+        List of valid timestamps (may be empty).
+    """
+    return [
+        dt
+        for fld in fields
+        if (dt := _parse_metadata_datetime(metadata.get(fld))) is not None
+    ]
+
+
+def _collect_dynamic_capture_dts(metadata: dict) -> List[pd.Timestamp]:
+    """Discover extra capture-date tags not listed in ``_CREATE_DT_TIERS``.
+
+    Scans metadata keys ending in ``DateTimeOriginal`` or ``CreationDate``.
+    Skips keys containing ``Modify`` (edit times, not capture) and keys already
+    handled explicitly. This catches vendor-specific groups without maintaining
+    an exhaustive ExifTool tag list.
+
+    Args:
+        metadata: ExifTool metadata dict.
+
+    Returns:
+        List of valid timestamps from matching keys.
+    """
+    known = set(
+        f
+        for tier in _CREATE_DT_TIERS
+        for f in tier
+    )
+    dts = []
+    for key, value in metadata.items():
+        if key in known or "Modify" in key:
+            continue
+        if not any(key.endswith(suffix) for suffix in _CAPTURE_DT_KEY_SUFFIXES):
+            continue
+        if (dt := _parse_metadata_datetime(value)) is not None:
+            dts.append(dt)
+    return dts
+
+
 def get_create_dt_from_metadata(metadata: dict) -> Optional[pd.Timestamp]:
-    for fld in CREATE_DT_FIELDS:
-        dt = _parse_metadata_datetime(metadata.get(fld))
-        if dt is not None:
-            return dt
+    """Estimate when media was captured or originally recorded.
+
+    **Why tiered minimum (not first-match or global min)?**
+
+    * **First-match** breaks when an important tag is missing from the list
+      (e.g. Apple ``QuickTime:CreationDate`` vs ``QuickTime:CreateDate``).
+    * **Global min** over all date tags lets corrupt ``ModifyDate`` or stale
+      ``FileModifyDate`` beat the real capture time.
+    * **Tiered min** limits ``min()`` to tags with similar meaning per tier, and
+      only falls back when higher tiers have no valid values.
+
+    Re-exports (Photos export, re-wrap) usually set container ``CreateDate`` /
+    ``MediaCreateDate`` *later* than the true capture; among capture-semantics
+    tags, the earliest valid date is typically correct.
+
+    Tiers (see module constants):
+
+    1. Capture: ``DateTimeOriginal``, ``QuickTime:CreationDate`` (Apple original),
+       XMP/RIFF/IPTC, plus dynamic ``*DateTimeOriginal`` / ``*CreationDate`` scan.
+       ``min()`` within tier 1.
+    2. Secondary capture: ``EXIF:CreateDate``, etc. Only if tier 1 is empty
+       (avoids a bad ``CreateDate`` overriding a good ``DateTimeOriginal``).
+    3. Container: QuickTime ``MediaCreateDate`` / ``CreateDate`` (re-export fallback).
+    4. Filesystem: ``File:FileModifyDate`` / ``FileCreateDate``.
+
+    ``*ModifyDate`` tags are never used.
+
+    Args:
+        metadata: ExifTool metadata dict.
+
+    Returns:
+        Best-effort capture timestamp (naive UTC), or ``None`` if no valid tag.
+    """
+    for tier_idx, fields in enumerate(_CREATE_DT_TIERS):
+        dts = _collect_valid_dts(metadata, fields)
+        if tier_idx == 0:
+            dts.extend(_collect_dynamic_capture_dts(metadata))
+        if dts:
+            return min(dts)
+
     print(
         "ERROR: Failed to extract create_dt from metadata; "
-        f"tried fields={CREATE_DT_FIELDS}, SourceFile={metadata.get('SourceFile')}"
+        f"tried tiers={_CREATE_DT_TIERS}, SourceFile={metadata.get('SourceFile')}"
     )
     return None
 
 
 def get_create_dt(file_path: str) -> Optional[pd.Timestamp]:
+    """Read metadata for one file and return estimated capture time.
+
+    Args:
+        file_path: Path to the media file.
+
+    Returns:
+        Result of ``get_create_dt_from_metadata``, or ``None``.
+    """
     metadata = get_metadata(file_path)
     return get_create_dt_from_metadata(metadata)
 
 
-def get_batches(lst: List, batch_size: int) -> List[List]:
+def get_batches(lst: List, batch_size: int):
+    """Yield consecutive slices of ``lst`` for batch processing.
+
+    Args:
+        lst: Sequence to chunk.
+        batch_size: Maximum items per batch (clamped to at least 1).
+
+    Yields:
+        Sublists of ``lst`` of length up to ``batch_size``.
+    """
     batch_size = max(1, batch_size)
     return (lst[i : i + batch_size] for i in range(0, len(lst), batch_size))
 
 
 class GetMetaDatasAugmented:
+    """Batch-load ExifTool metadata and attach destination filename fields.
+
+    Callable intended for ``multiprocessing.Pool.imap``: one ExifTool process
+    per batch, then per-file enrichment (capture time, location, content hash,
+    ``DestFileBase``).
+
+    Destination pattern (timestamp is naive UTC)::
+        {YYYYMMDD_HHMMSS}[__{location}][__{orig_base}][__{hash}].{ext}
+    """
+
     def __init__(
         self,
         include_metadata_hash_in_dest: bool = True,
         include_orig_name_in_dest: bool = False,
     ):
+        """Configure destination filename components.
+
+        Args:
+            include_metadata_hash_in_dest: Append ``MetadataHash`` before extension
+                to separate collisions at the same second/location.
+            include_orig_name_in_dest: Include original basename (without extension)
+                in the destination name for traceability.
+        """
         self.include_metadata_hash_in_dest = include_metadata_hash_in_dest
         self.include_orig_name_in_dest = include_orig_name_in_dest
 
     def __call__(self, file_paths: List[str]) -> List[dict]:
+        """Load metadata for a batch and set ``DestFileBase`` on each dict.
+
+        If ``get_create_dt_from_metadata`` returns ``None``, falls back to
+        ``get_file_create_date`` so renaming never crashes on missing EXIF.
+
+        Args:
+            file_paths: List of media file paths (one batch).
+
+        Returns:
+            Metadata dicts with ``Location``, ``MetadataHash``, ``DestFileBase``.
+        """
         assert isinstance(file_paths, list)
         with exiftool.ExifTool() as et:
             metadatas = et.get_metadata_batch(file_paths)
@@ -320,6 +621,22 @@ def get_metadatas_mproc(
     batch_size: int = 64,
     include_orig_name_in_dest: bool = False,
 ) -> List[Dict]:
+    """Load augmented metadata for many files using a process pool.
+
+    Results are cached via ``@memorize`` (see ``cacheutils``). Each worker runs
+    ``GetMetaDatasAugmented`` on a batch so ExifTool amortizes startup cost.
+
+    Note:
+        ``batch_size`` argument is overridden to 32 in the function body.
+
+    Args:
+        file_paths: All media paths to process.
+        batch_size: Ignored; kept for API compatibility (actual batch size is 32).
+        include_orig_name_in_dest: Passed to ``GetMetaDatasAugmented``.
+
+    Returns:
+        Flat list of metadata dicts with ``DestFileBase`` set.
+    """
     batch_size = 32
     file_path_batches = list(get_batches(file_paths, batch_size))
 
@@ -346,7 +663,30 @@ def cleaup_media_files(
     refresh_metacache: bool = False,
     move_or_copy: str = "move",
     log_file_path: str = None,
-):
+) -> List[dict]:
+    """Organize media into year folders with canonical capture-based filenames.
+
+    Scans ``src_root_dir``, computes destination names from metadata (capture time,
+    optional location/hash), groups by ``DestFileBase``, and moves or copies one
+    file per destination. Duplicate sources mapping to the same dest are reported.
+
+    Layout: ``{dest_root_dir}/{YYYY}/{YYYYMMDD_HHMMSS}__...ext``
+
+    Args:
+        src_root_dir: Tree of source photos/videos.
+        dest_root_dir: Library root; year subdirs are created as needed.
+        dry_run: If True, do not move/copy or create dirs (still writes log rows).
+        refresh_metacache: If True, bypass ``get_metadatas_mproc`` cache.
+        move_or_copy: ``"move"`` (``shutil.move``) or ``"copy"`` (``shutil.copy2``).
+        log_file_path: Log file path; defaults to ``/dev/null`` (dry run) or
+            ``{dest_root_dir}/log.txt``.
+
+    Returns:
+        List of per-file result dicts (``dest``, ``src``, ``other_srcs``, ``error``).
+
+    Raises:
+        AssertionError: If ``move_or_copy`` is not ``"move"`` or ``"copy"``.
+    """
     assert move_or_copy in [
         "move",
         "copy",
