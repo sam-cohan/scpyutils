@@ -921,18 +921,35 @@ def _collision_details(
     return details
 
 
+def _same_filesystem(path_a: str, path_b: str) -> bool:
+    """Return True when both paths reside on the same mounted filesystem."""
+    try:
+        return os.stat(path_a).st_dev == os.stat(path_b).st_dev
+    except OSError:
+        return False
+
+
 def _safe_transfer(
     src_path: str,
     dest_path: str,
     *,
     verify: bool = True,
+    is_move: bool = False,
     content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
-) -> None:
-    """Copy ``src_path`` to ``dest_path`` with optional verify and atomic replace.
+) -> str:
+    """Transfer ``src_path`` to ``dest_path``.
 
-    Does not remove the source; callers delete only after ``_verified_dest_has_src_content``.
+    When ``is_move`` is True and both paths share the same filesystem,
+    ``os.rename`` is used for an instant atomic move (no copy, no verify
+    needed, source disappears automatically).
+
+    Otherwise falls back to copy → hash-verify → atomic replace (source
+    stays on disk for the caller to handle).
+
+    Returns:
+        ``"renamed"`` if an instant rename was used, ``"copied"`` otherwise.
     """
     dest_dir = os.path.dirname(dest_path)
     if dest_dir:
@@ -944,22 +961,35 @@ def _safe_transfer(
         full_max_bytes=full_max_bytes,
         sample_bytes=sample_bytes,
     ):
-        return
+        return "copied"
+
+    if is_move and _same_filesystem(src_path, dest_dir):
+        os.rename(src_path, dest_path)
+        return "renamed"
 
     tmp_dest = dest_path + ".picutils.part"
     if os.path.exists(tmp_dest):
         os.remove(tmp_dest)
     shutil.copy2(src_path, tmp_dest)
-    if verify and not _files_are_identical(
-        src_path,
-        tmp_dest,
-        content_hash_mode=content_hash_mode,
-        full_max_bytes=full_max_bytes,
-        sample_bytes=sample_bytes,
-    ):
-        os.remove(tmp_dest)
-        raise OSError(f"transfer verification failed: src={src_path} dest={dest_path}")
+    if verify:
+        src_hash, _ = _get_content_fingerprint(
+            src_path,
+            content_hash_mode=content_hash_mode,
+            full_max_bytes=full_max_bytes,
+            sample_bytes=sample_bytes,
+        )
+        dest_hash, _ = _get_content_fingerprint(
+            tmp_dest,
+            content_hash_mode=content_hash_mode,
+            full_max_bytes=full_max_bytes,
+            sample_bytes=sample_bytes,
+            use_cache=False,
+        )
+        if src_hash is None or src_hash != dest_hash:
+            os.remove(tmp_dest)
+            raise OSError(f"transfer verification failed: src={src_path} dest={dest_path}")
     os.replace(tmp_dest, dest_path)
+    return "copied"
 
 
 def _live_photo_companion_path(path: str) -> Optional[str]:
@@ -1005,15 +1035,18 @@ def _transfer_live_companion(
     if os.path.exists(dest_path):
         return None
     if not dry_run:
-        _safe_transfer(
+        method = _safe_transfer(
             companion,
             dest_path,
             verify=verify,
+            is_move=is_move,
             content_hash_mode=content_hash_mode,
             full_max_bytes=full_max_bytes,
             sample_bytes=sample_bytes,
         )
-        if verify:
+        if method == "renamed":
+            counters["source_deleted"] += 1
+        elif verify:
             _handle_source_after_verify(
                 companion,
                 is_move=is_move,
@@ -1802,7 +1835,7 @@ def _print_mode_banner(
     mode = move_or_copy.upper()
     if move_or_copy == "move":
         behavior = (
-            "copy into the library, then send each verified source file to the Trash"
+            "rename (same FS) or copy+verify+trash (cross FS) each source into the library"
         )
     else:
         behavior = "copy into the library and leave source files on disk"
@@ -1838,6 +1871,7 @@ def _print_preflight_summary(
 _NEW_LIBRARY_ERRORS = frozenset(
     {
         "TRANSFERRED_SOURCE_DELETED",
+        "TRANSFERRED_SOURCE_RENAMED",
         "TRANSFERRED_SOURCE_KEPT",
         "TRANSFERRED_SOURCE_KEPT_UNVERIFIED",
     }
@@ -2138,15 +2172,18 @@ def _process_one_source(
                 row["quarantine_reloc"] = q_path
                 try:
                     os.makedirs(os.path.dirname(q_path), exist_ok=True)
-                    _safe_transfer(
+                    q_method = _safe_transfer(
                         src_file_path,
                         q_path,
                         verify=verify_transfers,
+                        is_move=True,
                         content_hash_mode=content_hash_mode,
                         full_max_bytes=full_max_bytes,
                         sample_bytes=sample_bytes,
                     )
-                    if _verified_dest_has_src_content(
+                    if q_method == "renamed":
+                        counters["source_deleted"] += 1
+                    elif _verified_dest_has_src_content(
                         src_file_path,
                         q_path,
                         src_metadata,
@@ -2226,14 +2263,15 @@ def _process_one_source(
                 _print_destination_exists(row)
             return row
 
-    # 3) Destination missing → copy, verify, delete source when verified.
+    # 3) Destination missing → move/copy, verify, handle source.
     error = ""
     if not dry_run:
         try:
-            _safe_transfer(
+            method = _safe_transfer(
                 src_file_path,
                 dest_file_path,
                 verify=verify_transfers,
+                is_move=is_move,
                 content_hash_mode=content_hash_mode,
                 full_max_bytes=full_max_bytes,
                 sample_bytes=sample_bytes,
@@ -2241,7 +2279,11 @@ def _process_one_source(
             counters["success"] += 1
             if src_hash:
                 group_content_hashes.add(src_hash)
-            if verify_transfers:
+            if method == "renamed":
+                processed_srcs.add(src_file_path)
+                counters["source_deleted"] += 1
+                error = "TRANSFERRED_SOURCE_RENAMED"
+            elif verify_transfers:
                 error = _handle_source_after_verify(
                     src_file_path,
                     is_move=is_move,
@@ -2278,10 +2320,10 @@ def _process_one_source(
                 row["linked_companion"] = companion
         except Exception as e:
             counters["unexpected"] += 1
-            error = str(e)
+            error = f"{type(e).__name__}: {e}"
             print(
-                f"unable to {_mode_action_label('move' if is_move else 'copy')} "
-                f"src={src_file_path}: {e}"
+                f"ERROR: skipping {_mode_action_label('move' if is_move else 'copy')} "
+                f"src={src_file_path}: {error}"
             )
     else:
         companion = _live_photo_companion_path(src_file_path)
@@ -2318,9 +2360,15 @@ def cleaup_media_files(
 ) -> List[dict]:
     """Organize media into year folders with canonical capture-based filenames.
 
-    Scans ``src_root_dir``, computes destination names from metadata (capture time,
-    optional location/hash), groups by ``DestFileBase``, and moves or copies files
-    to their destinations. Every source in a duplicate group is processed in one run.
+    Uses a **streaming pipeline**: each file is augmented (datetime, location, hash),
+    moved/copied, and logged before the next file starts. If interrupted, all
+    previously processed files are done — restart picks up where it left off
+    (moved sources are gone from the source scan, copied sources will match the
+    existing destination and be logged as duplicates).
+
+    On the **same filesystem**, ``move`` mode uses ``os.rename()`` for instant
+    atomic moves (no copy, no verify, no trash needed). Cross-filesystem moves
+    fall back to copy + hash-verify + send2trash.
 
     Layout: ``{dest_root_dir}/{YYYY}/{MM}/{DestFileBase}`` (default ``iso_geo_hash`` filenames:
     ``{YYYYMMDD}_{HHMMSS}{±HHMM}__{geo}__{hash16}.{ext}`` (empty geo → ``____`` in the name).
@@ -2331,10 +2379,10 @@ def cleaup_media_files(
         dry_run: If True, do not move/copy or create dirs (still writes log rows).
         refresh_metacache: If True, re-run ExifTool and replace the on-disk cache
             (use when files are new/updated; not needed for date/naming logic changes).
-        move_or_copy: ``"move"`` or ``"copy"``. Both copy bytes into the library with
-            verification. **Move** sends each verified source file to the **Trash**
-            (via ``send2trash``). **Copy** leaves sources on disk. With
-            ``verify_transfers=False``, sources are never trashed automatically (either mode).
+        move_or_copy: ``"move"`` or ``"copy"``. On the same filesystem, **move** uses
+            ``os.rename()`` (instant, atomic). Cross-filesystem moves copy bytes with
+            hash verification, then send the source to **Trash** (``send2trash``).
+            **Copy** always copies bytes and leaves sources on disk.
         include_content_hash_in_dest: When ``dest_name_mode="capture_content"``, append
             content hash (16 hex chars of xxHash64) to the capture-based filename.
         include_orig_name_in_dest: Include original basename (``capture_content`` only).
@@ -2408,50 +2456,6 @@ def cleaup_media_files(
         dest_logic_version=DEST_LOGIC_VERSION,
     )
     print(f"Retrieved {len(metadatas):,.0f} metadatas.")
-    print("Computing destination names from metadata (current date/location logic)...")
-    augment_metadatas_for_dest(
-        metadatas,
-        include_content_hash_in_dest=include_content_hash_in_dest,
-        include_orig_name_in_dest=include_orig_name_in_dest,
-        include_metadata_hash_in_dest=include_metadata_hash_in_dest,
-        dest_name_mode=dest_name_mode,
-        content_hash_mode=content_hash_mode,
-        content_hash_full_max_bytes=content_hash_full_max_bytes,
-        content_hash_sample_bytes=content_hash_sample_bytes,
-        progress=progress,
-    )
-    metadata_by_path = {m["SourceFile"]: m for m in metadatas}
-
-    dest_file_src_files = defaultdict(list)
-    for metadata in metadatas:
-        dest_file_src_files[_dest_group_key(metadata)].append(metadata["SourceFile"])
-    duplicate_groups = [
-        (key, srcs) for key, srcs in dest_file_src_files.items() if len(srcs) > 1
-    ]
-    if duplicate_groups:
-        print(
-            f"WARNING: found {len(duplicate_groups):,.0f} duplicate source groups "
-            f"({sum(len(s) for _, s in duplicate_groups):,.0f} files)."
-        )
-
-    preflight = _compute_preflight_counts(
-        dest_file_src_files,
-        dest_root_dir,
-        metadata_by_path,
-        content_hash_mode=content_hash_mode,
-        full_max_bytes=content_hash_full_max_bytes,
-        sample_bytes=content_hash_sample_bytes,
-        progress=progress,
-    )
-    _print_preflight_summary(preflight, dry_run=dry_run, move_or_copy=move_or_copy)
-
-    dest_month_dirs = sorted({(key[0], key[1]) for key in dest_file_src_files})
-    for dest_year, dest_month in dest_month_dirs:
-        dest_dir = os.path.join(dest_root_dir, dest_year, dest_month)
-        if not os.path.exists(dest_dir):
-            print(f"WARNING: will create destination directory {dest_dir}")
-            if not dry_run:
-                os.makedirs(dest_dir, exist_ok=True)
 
     if log_file_path is None:
         log_file_path = os.path.join(dest_root_dir, "log.txt")
@@ -2459,89 +2463,122 @@ def cleaup_media_files(
     if collisions_dir and not dry_run:
         os.makedirs(collisions_dir, exist_ok=True)
 
+    geo_lookup = _batch_reverse_geocode(metadatas)
+    metadata_by_path: Dict[str, dict] = {m["SourceFile"]: m for m in metadatas}
+
     action = _mode_action_label(move_or_copy, past=True)
     print(
-        f"{action.capitalize()} files into library "
+        f"Processing files — augment + {action} "
         f"(logging to {log_file_path})..."
     )
     rows: List[dict] = []
     counters = defaultdict(int)
     processed_srcs: Set[str] = set()
+    dest_file_src_files: Dict[Tuple[str, str, str], List[str]] = defaultdict(list)
+    dest_content_hashes: Dict[str, Optional[str]] = {}
+    group_content_hashes_map: Dict[Tuple[str, str, str], Set[str]] = defaultdict(set)
 
     with open(log_file_path, "a") as log_file:
-        for group_key, src_file_paths in _iter_progress(
-            sorted(dest_file_src_files.items()),
-            progress=progress,
-            desc=move_or_copy,
-            total=len(dest_file_src_files),
+        for metadata in _iter_progress(
+            metadatas, progress=progress, desc=move_or_copy, total=len(metadatas)
         ):
+            src_file_path = metadata["SourceFile"]
+            if src_file_path in processed_srcs:
+                continue
+
+            try:
+                augment_metadata_for_dest(
+                    metadata,
+                    include_content_hash_in_dest=include_content_hash_in_dest,
+                    include_orig_name_in_dest=include_orig_name_in_dest,
+                    include_metadata_hash_in_dest=include_metadata_hash_in_dest,
+                    dest_name_mode=dest_name_mode,
+                    content_hash_mode=content_hash_mode,
+                    content_hash_full_max_bytes=content_hash_full_max_bytes,
+                    content_hash_sample_bytes=content_hash_sample_bytes,
+                    _geo_lookup=geo_lookup,
+                )
+            except Exception as e:
+                counters["unexpected"] += 1
+                row = _log_event(
+                    log_file,
+                    {"src": src_file_path, "error": f"AUGMENT_FAILED: {e}"},
+                    session,
+                )
+                rows.append(row)
+                print(f"ERROR: augment failed for {src_file_path}: {e}")
+                continue
+
+            group_key = _dest_group_key(metadata)
+            dest_file_src_files[group_key].append(src_file_path)
+            sibling_srcs = [
+                p for p in dest_file_src_files[group_key] if p != src_file_path
+            ]
+
             dest_year, dest_month, dest_file_base = group_key
             dest_file_path = os.path.join(
                 dest_root_dir, dest_year, dest_month, dest_file_base
             )
+            if not dry_run:
+                os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
+
             dest_metadata = metadata_by_path.get(dest_file_path)
-            sorted_srcs = sorted(src_file_paths)
-            dest_content_hash = (
-                _dest_content_fingerprint(
+            dest_content_hash = dest_content_hashes.get(dest_file_path)
+            if dest_content_hash is None and os.path.exists(dest_file_path):
+                dest_content_hash = _dest_content_fingerprint(
                     dest_file_path,
                     content_hash_mode=content_hash_mode,
                     full_max_bytes=content_hash_full_max_bytes,
                     sample_bytes=content_hash_sample_bytes,
                 )
-                if os.path.exists(dest_file_path)
-                else None
-            )
-            group_content_hashes: Set[str] = set()
+            group_content_hashes = group_content_hashes_map[group_key]
 
-            for idx, src_file_path in enumerate(sorted_srcs):
-                if src_file_path in processed_srcs:
-                    continue
-                sibling_srcs = sorted_srcs[:idx] + sorted_srcs[idx + 1 :]
-                row = _process_one_source(
-                    src_file_path=src_file_path,
-                    dest_file_path=dest_file_path,
-                    dest_year=dest_year,
-                    dest_month=dest_month,
-                    dest_file_base=dest_file_base,
-                    sibling_srcs=sibling_srcs,
-                    src_metadata=metadata_by_path[src_file_path],
-                    dest_metadata=dest_metadata,
-                    metadata_by_path=metadata_by_path,
-                    dest_root_dir=dest_root_dir,
-                    is_move=is_move,
-                    dry_run=dry_run,
-                    verify_transfers=verify_transfers,
-                    collisions_dir=collisions_dir if is_move else None,
-                    log_file=log_file,
-                    session=session,
-                    verbose_collisions=verbose_collisions,
-                    processed_srcs=processed_srcs,
-                    counters=counters,
-                    dest_content_hash=dest_content_hash,
-                    group_content_hashes=group_content_hashes,
+            row = _process_one_source(
+                src_file_path=src_file_path,
+                dest_file_path=dest_file_path,
+                dest_year=dest_year,
+                dest_month=dest_month,
+                dest_file_base=dest_file_base,
+                sibling_srcs=sibling_srcs,
+                src_metadata=metadata,
+                dest_metadata=dest_metadata,
+                metadata_by_path=metadata_by_path,
+                dest_root_dir=dest_root_dir,
+                is_move=is_move,
+                dry_run=dry_run,
+                verify_transfers=verify_transfers,
+                collisions_dir=collisions_dir if is_move else None,
+                log_file=log_file,
+                session=session,
+                verbose_collisions=verbose_collisions,
+                processed_srcs=processed_srcs,
+                counters=counters,
+                dest_content_hash=dest_content_hash,
+                group_content_hashes=group_content_hashes,
+                content_hash_mode=content_hash_mode,
+                full_max_bytes=content_hash_full_max_bytes,
+                sample_bytes=content_hash_sample_bytes,
+            )
+            rows.append(row)
+            row_hash = _metadata_content_hash(metadata)
+            if row_hash and row.get("error") in (
+                "",
+                "TRANSFERRED_SOURCE_DELETED",
+                "TRANSFERRED_SOURCE_RENAMED",
+                "TRANSFERRED_SOURCE_KEPT",
+                "IDENTICAL_SOURCE_DELETED",
+                "IDENTICAL_SOURCE_KEPT",
+                "IDENTICAL_DESTINATION_EXISTS",
+                "IDENTICAL_SOURCE_ALREADY_HANDLED",
+            ):
+                dest_content_hashes[dest_file_path] = row_hash
+            elif os.path.exists(dest_file_path) and dest_file_path not in dest_content_hashes:
+                dest_content_hashes[dest_file_path] = _dest_content_fingerprint(
+                    dest_file_path,
                     content_hash_mode=content_hash_mode,
                     full_max_bytes=content_hash_full_max_bytes,
                     sample_bytes=content_hash_sample_bytes,
                 )
-                rows.append(row)
-                row_hash = _metadata_content_hash(metadata_by_path[src_file_path])
-                if row_hash and row.get("error") in (
-                    "",
-                    "TRANSFERRED_SOURCE_DELETED",
-                    "TRANSFERRED_SOURCE_KEPT",
-                    "IDENTICAL_SOURCE_DELETED",
-                    "IDENTICAL_SOURCE_KEPT",
-                    "IDENTICAL_DESTINATION_EXISTS",
-                    "IDENTICAL_SOURCE_ALREADY_HANDLED",
-                ):
-                    dest_content_hash = row_hash
-                elif os.path.exists(dest_file_path) and dest_content_hash is None:
-                    dest_content_hash = _dest_content_fingerprint(
-                        dest_file_path,
-                        content_hash_mode=content_hash_mode,
-                        full_max_bytes=content_hash_full_max_bytes,
-                        sample_bytes=content_hash_sample_bytes,
-                    )
 
         _print_run_summary(
             rows,

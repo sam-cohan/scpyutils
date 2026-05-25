@@ -73,10 +73,35 @@ def test_files_are_identical_and_safe_transfer(tmp_path):
     dest = tmp_path / "b.jpg"
     src.write_bytes(b"same-bytes")
     assert not picu._files_are_identical(str(src), str(dest))
-    picu._safe_transfer(str(src), str(dest), verify=True)
+    method = picu._safe_transfer(str(src), str(dest), verify=True)
+    assert method == "copied"
     assert dest.read_bytes() == b"same-bytes"
     assert picu._files_are_identical(str(src), str(dest))
     assert src.exists()
+
+
+def test_safe_transfer_rename_on_same_fs(tmp_path):
+    src = tmp_path / "src" / "photo.jpg"
+    dest = tmp_path / "dest" / "photo.jpg"
+    src.parent.mkdir()
+    dest.parent.mkdir()
+    src.write_bytes(b"rename-me")
+    method = picu._safe_transfer(str(src), str(dest), is_move=True)
+    assert method == "renamed"
+    assert not src.exists()
+    assert dest.read_bytes() == b"rename-me"
+
+
+def test_safe_transfer_copy_mode_never_renames(tmp_path):
+    src = tmp_path / "src" / "photo.jpg"
+    dest = tmp_path / "dest" / "photo.jpg"
+    src.parent.mkdir()
+    dest.parent.mkdir()
+    src.write_bytes(b"keep-me")
+    method = picu._safe_transfer(str(src), str(dest), is_move=False, verify=True)
+    assert method == "copied"
+    assert src.exists()
+    assert dest.read_bytes() == b"keep-me"
 
 
 def test_delete_after_verified_transfer(tmp_path, monkeypatch):
@@ -383,23 +408,21 @@ def _fake_metadata(path: str, dest_base: str, *, capture_source: str = "metadata
     }
 
 
-def _apply_fake_dest_metadatas(metadatas, **kwargs):
-    """Keep DestFileBase from mocks; only add fields augment would set."""
-    for metadata in metadatas:
-        if "MetadataHash" not in metadata:
-            metadata["MetadataHash"] = "abc123"
-        if "CaptureDtUtc" not in metadata:
-            metadata["CaptureDtUtc"] = "2020-01-01 12:00:00"
-        if "CaptureDateSource" not in metadata:
-            metadata["CaptureDateSource"] = "metadata"
-        if "DestYear" not in metadata:
-            metadata["DestYear"] = "2020"
-        if "DestMonth" not in metadata:
-            metadata["DestMonth"] = "01"
-    return metadatas
+def _apply_fake_augment_single(metadata, **kwargs):
+    """Mock for augment_metadata_for_dest (per-file): fill in fields if missing."""
+    if "MetadataHash" not in metadata:
+        metadata["MetadataHash"] = "abc123"
+    if "CaptureDtUtc" not in metadata:
+        metadata["CaptureDtUtc"] = "2020-01-01 12:00:00"
+    if "CaptureDateSource" not in metadata:
+        metadata["CaptureDateSource"] = "metadata"
+    if "DestYear" not in metadata:
+        metadata["DestYear"] = "2020"
+    if "DestMonth" not in metadata:
+        metadata["DestMonth"] = "01"
 
 
-@patch.object(picu, "augment_metadatas_for_dest", side_effect=_apply_fake_dest_metadatas)
+@patch.object(picu, "augment_metadata_for_dest", side_effect=_apply_fake_augment_single)
 @patch.object(picu, "get_all_media_file_paths")
 @patch.object(picu, "get_metadatas_mproc")
 def test_cleaup_processes_all_sources_in_group(
@@ -426,20 +449,22 @@ def test_cleaup_processes_all_sources_in_group(
         _fake_metadata(str(src_b), dest_base),
     ]
 
-    rows = picu.cleaup_media_files(
-        str(src_root),
-        str(dest_root),
-        dry_run=False,
-        move_or_copy="move",
-        progress=False,
-    )
+    trashed = []
+    with patch.object(picu, "_trash_file", side_effect=lambda p: (trashed.append(p), os.remove(p))):
+        rows = picu.cleaup_media_files(
+            str(src_root),
+            str(dest_root),
+            dry_run=False,
+            move_or_copy="move",
+            progress=False,
+        )
     assert len(rows) == 2
     assert all(r["error"] == "IDENTICAL_SOURCE_DELETED" for r in rows)
     assert not src_a.exists()
     assert not src_b.exists()
 
 
-@patch.object(picu, "augment_metadatas_for_dest", side_effect=_apply_fake_dest_metadatas)
+@patch.object(picu, "augment_metadata_for_dest", side_effect=_apply_fake_augment_single)
 @patch.object(picu, "get_all_media_file_paths")
 @patch.object(picu, "get_metadatas_mproc")
 def test_cleaup_copy_mode_identical_error(mock_mproc, mock_scan, _mock_augment, tmp_path):
@@ -468,7 +493,7 @@ def test_cleaup_copy_mode_identical_error(mock_mproc, mock_scan, _mock_augment, 
     assert src.exists()
 
 
-@patch.object(picu, "augment_metadatas_for_dest", side_effect=_apply_fake_dest_metadatas)
+@patch.object(picu, "augment_metadata_for_dest", side_effect=_apply_fake_augment_single)
 @patch.object(picu, "get_all_media_file_paths")
 @patch.object(picu, "get_metadatas_mproc")
 def test_cleaup_quarantine_collision(mock_mproc, mock_scan, _mock_augment, tmp_path):
@@ -502,7 +527,7 @@ def test_cleaup_quarantine_collision(mock_mproc, mock_scan, _mock_augment, tmp_p
     assert os.path.exists(rows[0]["quarantine_reloc"])
 
 
-@patch.object(picu, "augment_metadatas_for_dest", side_effect=_apply_fake_dest_metadatas)
+@patch.object(picu, "augment_metadata_for_dest", side_effect=_apply_fake_augment_single)
 @patch.object(picu, "get_all_media_file_paths")
 @patch.object(picu, "get_metadatas_mproc")
 def test_cleaup_log_includes_session_fields(mock_mproc, mock_scan, _mock_augment, tmp_path):
