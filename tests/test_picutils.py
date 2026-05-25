@@ -2,6 +2,9 @@
 
 import json
 import os
+import sys
+import types
+from collections import defaultdict
 from unittest.mock import patch
 
 import pandas as pd
@@ -70,16 +73,33 @@ def test_files_are_identical_and_safe_transfer(tmp_path):
     dest = tmp_path / "b.jpg"
     src.write_bytes(b"same-bytes")
     assert not picu._files_are_identical(str(src), str(dest))
-    picu._safe_transfer(str(src), str(dest), is_move=False, verify=True)
+    picu._safe_transfer(str(src), str(dest), verify=True)
     assert dest.read_bytes() == b"same-bytes"
     assert picu._files_are_identical(str(src), str(dest))
+    assert src.exists()
 
 
-def test_safe_transfer_move_removes_source(tmp_path):
+def test_delete_after_verified_transfer(tmp_path, monkeypatch):
+    trashed: list[str] = []
+
+    def _record_trash(path: str) -> None:
+        trashed.append(path)
+        os.remove(path)
+
+    monkeypatch.setattr(picu, "_trash_file", _record_trash)
     src = tmp_path / "a.jpg"
     dest = tmp_path / "out" / "a.jpg"
     src.write_bytes(b"move-me")
-    picu._safe_transfer(str(src), str(dest), is_move=True, verify=True)
+    counters = defaultdict(int)
+    picu._safe_transfer(str(src), str(dest), verify=True)
+    assert picu._verified_dest_has_src_content(
+        str(src), str(dest), {}, None, verify_transfers=True
+    )
+    err = picu._delete_verified_source(
+        str(src), dry_run=False, counters=counters, processed_srcs=set(), reason="transfer"
+    )
+    assert err == "TRANSFERRED_SOURCE_DELETED"
+    assert trashed == [str(src)]
     assert dest.read_bytes() == b"move-me"
     assert not src.exists()
 
@@ -93,6 +113,151 @@ def test_live_photo_companion_path(tmp_path):
     assert os.path.samefile(picu._live_photo_companion_path(str(mov)), str(heic))
 
 
+def test_summarize_run_rows_move_and_duplicates():
+    rows = [
+        {"error": "TRANSFERRED_SOURCE_DELETED"},
+        {"error": "IDENTICAL_SOURCE_DELETED"},
+        {"error": "IDENTICAL_DESTINATION_EXISTS"},
+        {"error": "DESTINATION_EXISTS"},
+        {"error": "COLLISION_MOVED_TO_QUARANTINE"},
+        {"warning": "NO_CAPTURE_DATE_USED_MTIME"},
+    ]
+    s = picu._summarize_run_rows(rows)
+    assert s["processed"] == 6
+    assert s["new_to_library"] == 1
+    assert s["duplicate_trashed"] == 1
+    assert s["duplicate_kept"] == 1
+    assert s["collision_logged"] == 1
+    assert s["collision_quarantined"] == 1
+    assert s["mtime_fallback"] == 1
+
+
+def test_batch_reverse_geocode_real():
+    """Verify _batch_reverse_geocode uses the real reverse_geocode library correctly."""
+    metadatas = [
+        {"Composite:GPSLatitude": 37.7749, "Composite:GPSLongitude": -122.4194},
+        {"Composite:GPSLatitude": 43.6532, "Composite:GPSLongitude": -79.3832},
+        {},
+    ]
+    lookup = picu._batch_reverse_geocode(metadatas)
+    assert len(lookup) == 2
+    assert "US-San-Francisco" in lookup[(37.7749, -122.4194)]
+    assert lookup[(43.6532, -79.3832)].startswith("CA-")
+
+
+def test_get_location_from_metadata_real():
+    """Verify get_location_from_metadata calls reverse_geocode without error."""
+    meta = {"Composite:GPSLatitude": 37.7749, "Composite:GPSLongitude": -122.4194}
+    loc = picu.get_location_from_metadata(meta)
+    assert "US-San-Francisco" in loc
+
+    assert picu.get_location_from_metadata({}) == ""
+
+
+def test_dest_filename_iso_geo_hash_default(tmp_path):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"unique-bytes-for-hash")
+    content_hash = picu.get_content_hash_for_dest(str(path))
+    metadata = {
+        "SourceFile": str(path),
+        "EXIF:DateTimeOriginal": "2020:01:01 12:00:00",
+    }
+    picu.augment_metadata_for_dest(metadata)
+    assert metadata["DestFileBase"] == f"20200101_120000+0000____{content_hash}.jpg"
+    assert metadata["DestYear"] == "2020"
+    assert metadata["DestMonth"] == "01"
+    assert metadata["CaptureIsoForDest"] == "20200101_120000+0000"
+    assert metadata["CaptureTzSource"] == "utc"
+    assert metadata["Location"] == ""
+
+
+def test_dest_filename_uses_exif_offset_local_time(tmp_path):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"offset-tz-bytes")
+    metadata = {
+        "SourceFile": str(path),
+        "EXIF:DateTimeOriginal": "2020:03:15 14:30:22",
+        "EXIF:OffsetTimeOriginal": "-04:00",
+    }
+    picu.augment_metadata_for_dest(
+        metadata, include_content_hash_in_dest=False
+    )
+    assert metadata["CaptureIsoForDest"] == "20200315_143022-0400"
+    assert metadata["DestYear"] == "2020"
+    assert metadata["DestMonth"] == "03"
+    assert metadata["DestFileBase"] == "20200315_143022-0400__.jpg"  # no hash → geo empty → iso__
+    assert "18:30:22" in metadata["CaptureDtUtc"]
+
+
+def test_dest_filename_gps_inferred_timezone(tmp_path, monkeypatch):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"gps-tz-bytes")
+
+    class FakeTZF:
+        def timezone_at(self, *, lng, lat):
+            return "America/New_York"
+
+    fake_mod = types.ModuleType("timezonefinder")
+    fake_mod.TimezoneFinder = FakeTZF
+    monkeypatch.setitem(sys.modules, "timezonefinder", fake_mod)
+    metadata = {
+        "SourceFile": str(path),
+        "EXIF:DateTimeOriginal": "2020:07:04 12:00:00",
+        "Composite:GPSLatitude": 40.7,
+        "Composite:GPSLongitude": -74.0,
+    }
+    picu.augment_metadata_for_dest(
+        metadata, include_content_hash_in_dest=False
+    )
+    assert metadata["CaptureTzSource"] == "gps"
+    assert metadata["CaptureIsoForDest"].endswith("-0400") or metadata[
+        "CaptureIsoForDest"
+    ].endswith("-0500")
+    assert metadata["DestMonth"] == "07"
+
+
+def test_dest_filename_utc_fallback_without_tz(tmp_path):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"no-tz-bytes")
+    metadata = {
+        "SourceFile": str(path),
+        "EXIF:DateTimeOriginal": "2020:06:10 09:15:30",
+    }
+    picu.augment_metadata_for_dest(
+        metadata, include_content_hash_in_dest=False
+    )
+    assert metadata["CaptureTzSource"] == "utc"
+    assert metadata["CaptureIsoForDest"] == "20200610_091530+0000"
+    assert metadata["Location"] == ""
+
+
+def test_dest_filename_content_only_mode(tmp_path):
+    path = tmp_path / "photo.jpg"
+    path.write_bytes(b"unique-bytes-for-hash")
+    content_hash = picu.get_content_hash_for_dest(str(path))
+    metadata = {
+        "SourceFile": str(path),
+        "EXIF:DateTimeOriginal": "2020:01:01 12:00:00",
+    }
+    picu.augment_metadata_for_dest(
+        metadata, dest_name_mode=picu.DEST_NAME_MODE_CONTENT_ONLY
+    )
+    assert metadata["DestFileBase"] == f"{content_hash}.jpg"
+
+
+def test_same_bytes_same_dest_name_different_capture_tags(tmp_path):
+    """Byte-identical files share one dest name even if ExifTool dates differ."""
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "b.jpg"
+    a.write_bytes(b"same-payload")
+    b.write_bytes(b"same-payload")
+    meta_a = {"SourceFile": str(a), "EXIF:DateTimeOriginal": "2020:01:01 12:00:00"}
+    meta_b = {"SourceFile": str(b), "EXIF:DateTimeOriginal": "2021:06:15 08:30:00"}
+    picu.augment_metadata_for_dest(meta_a, dest_name_mode=picu.DEST_NAME_MODE_CONTENT_ONLY)
+    picu.augment_metadata_for_dest(meta_b, dest_name_mode=picu.DEST_NAME_MODE_CONTENT_ONLY)
+    assert meta_a["DestFileBase"] == meta_b["DestFileBase"]
+
+
 def test_augment_metadata_mtime_fallback(tmp_path):
     path = tmp_path / "no_meta.jpg"
     path.write_bytes(b"x")
@@ -100,18 +265,81 @@ def test_augment_metadata_mtime_fallback(tmp_path):
     with patch.object(picu, "get_create_dt_from_metadata", return_value=None):
         picu.augment_metadata_for_dest(
             metadata,
-            include_metadata_hash_in_dest=False,
+            include_content_hash_in_dest=False,
             include_orig_name_in_dest=False,
         )
     assert metadata["CaptureDateSource"] == "file_mtime"
-    assert metadata["DestFileBase"].endswith(".jpg")
+    assert metadata["CaptureTzSuffix"] == "+0000"
+    assert "+0000" in metadata["DestFileBase"]
+
+
+def _reset_content_fp_cache():
+    picu._content_fp_cache = None
+    picu._content_fp_cache_dirty = False
+
+
+@pytest.fixture(autouse=True)
+def _isolated_content_fp_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(picu, "_CONTENT_FP_CACHE_DIR", str(tmp_path / "cache"))
+    _reset_content_fp_cache()
+    yield
+    _reset_content_fp_cache()
+
+
+def test_large_file_uses_sample_fingerprint(tmp_path):
+    """Files above the threshold should not require a full-file read."""
+    path = tmp_path / "big.mov"
+    head = b"A" * 64
+    tail = b"B" * 64
+    path.write_bytes(head + b"middle" * 1000 + tail)
+
+    digest, method = picu._file_content_fingerprint(
+        str(path),
+        content_hash_mode=picu.CONTENT_HASH_MODE_AUTO,
+        full_max_bytes=256,
+        sample_bytes=64,
+    )
+    assert method == picu.CONTENT_HASH_MODE_SAMPLE
+    assert digest == picu._file_sample_fingerprint(str(path), sample_bytes=64)
+    assert digest != picu._file_full_hash(str(path))
+
+
+def test_sample_fingerprint_matches_identical_large_files(tmp_path):
+    a = tmp_path / "a.mov"
+    b = tmp_path / "b.mov"
+    payload = b"X" * 128 + b"video-bytes" * 500 + b"Y" * 128
+    a.write_bytes(payload)
+    b.write_bytes(payload)
+    assert picu._files_are_identical(
+        str(a),
+        str(b),
+        content_hash_mode=picu.CONTENT_HASH_MODE_AUTO,
+        full_max_bytes=64,
+        sample_bytes=32,
+    )
+
+
+def test_content_fingerprint_cache_skips_recompute(tmp_path, monkeypatch):
+    path = tmp_path / "cached.jpg"
+    path.write_bytes(b"cache-me")
+    calls = {"n": 0}
+    real = picu._file_content_fingerprint
+
+    def counting_fingerprint(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(picu, "_file_content_fingerprint", counting_fingerprint)
+    picu._get_content_fingerprint(str(path))
+    picu._get_content_fingerprint(str(path))
+    assert calls["n"] == 1
 
 
 def test_compute_preflight_counts(tmp_path):
     dest_root = tmp_path / "dest"
-    year_dir = dest_root / "2020"
-    year_dir.mkdir(parents=True)
-    dest_file = year_dir / "20200101_120000.jpg"
+    month_dir = dest_root / "2020" / "01"
+    month_dir.mkdir(parents=True)
+    dest_file = month_dir / "20200101_120000.jpg"
     dest_file.write_bytes(b"dest")
 
     src_identical = tmp_path / "same.jpg"
@@ -120,7 +348,8 @@ def test_compute_preflight_counts(tmp_path):
     src_collision.write_bytes(b"other")
 
     dest_base = "20200101_120000.jpg"
-    groups = {dest_base: [str(src_identical), str(src_collision)]}
+    group_key = ("2020", "01", dest_base)
+    groups = {group_key: [str(src_identical), str(src_collision)]}
     meta = {
         str(src_identical): {"CaptureDateSource": "metadata"},
         str(src_collision): {"CaptureDateSource": "metadata"},
@@ -133,7 +362,7 @@ def test_compute_preflight_counts(tmp_path):
     src_new.write_bytes(b"fresh")
     transfer_base = "20200101_130000.jpg"
     counts2 = picu._compute_preflight_counts(
-        {transfer_base: [str(src_new)]},
+        {("2020", "01", transfer_base): [str(src_new)]},
         str(dest_root),
         {str(src_new): {"CaptureDateSource": "file_mtime"}},
     )
@@ -148,7 +377,9 @@ def _fake_metadata(path: str, dest_base: str, *, capture_source: str = "metadata
         "MetadataHash": "abc123",
         "CaptureDtUtc": "2020-01-01 12:00:00",
         "CaptureDateSource": capture_source,
-        "ContentSha256": picu._file_sha256(path),
+        "DestYear": "2020",
+        "DestMonth": "01",
+        "ContentHash": picu._file_full_hash(path),
     }
 
 
@@ -161,6 +392,10 @@ def _apply_fake_dest_metadatas(metadatas, **kwargs):
             metadata["CaptureDtUtc"] = "2020-01-01 12:00:00"
         if "CaptureDateSource" not in metadata:
             metadata["CaptureDateSource"] = "metadata"
+        if "DestYear" not in metadata:
+            metadata["DestYear"] = "2020"
+        if "DestMonth" not in metadata:
+            metadata["DestMonth"] = "01"
     return metadatas
 
 
@@ -172,15 +407,12 @@ def test_cleaup_processes_all_sources_in_group(
 ):
     src_root = tmp_path / "src"
     dest_root = tmp_path / "dest"
-    dup_dir = tmp_path / "dups"
     src_root.mkdir()
     dest_root.mkdir(parents=True)
-    dup_dir.mkdir()
 
     dest_base = "20200101_120000__hash1.jpg"
-    year_dir = dest_root / "2020"
-    year_dir.mkdir()
-    dest_path = year_dir / dest_base
+    dest_path = dest_root / "2020" / "01" / dest_base
+    dest_path.parent.mkdir(parents=True)
     dest_path.write_bytes(b"library")
 
     src_a = src_root / "a.jpg"
@@ -199,11 +431,10 @@ def test_cleaup_processes_all_sources_in_group(
         str(dest_root),
         dry_run=False,
         move_or_copy="move",
-        identical_duplicates_dir=str(dup_dir),
         progress=False,
     )
     assert len(rows) == 2
-    assert all(r["error"] == "IDENTICAL_MOVED_TO_DUPLICATES" for r in rows)
+    assert all(r["error"] == "IDENTICAL_SOURCE_DELETED" for r in rows)
     assert not src_a.exists()
     assert not src_b.exists()
 
@@ -218,8 +449,8 @@ def test_cleaup_copy_mode_identical_error(mock_mproc, mock_scan, _mock_augment, 
     dest_root.mkdir(parents=True)
 
     dest_base = "20200101_120000.jpg"
-    (dest_root / "2020").mkdir()
-    (dest_root / "2020" / dest_base).write_bytes(b"x")
+    (dest_root / "2020" / "01").mkdir(parents=True)
+    (dest_root / "2020" / "01" / dest_base).write_bytes(b"x")
 
     src = src_root / "x.jpg"
     src.write_bytes(b"x")
@@ -233,7 +464,7 @@ def test_cleaup_copy_mode_identical_error(mock_mproc, mock_scan, _mock_augment, 
         move_or_copy="copy",
         progress=False,
     )
-    assert rows[0]["error"] == "IDENTICAL_DESTINATION_EXISTS"
+    assert rows[0]["error"] == "IDENTICAL_SOURCE_KEPT"
     assert src.exists()
 
 
@@ -249,8 +480,8 @@ def test_cleaup_quarantine_collision(mock_mproc, mock_scan, _mock_augment, tmp_p
     quarantine.mkdir()
 
     dest_base = "20200101_120000.jpg"
-    (dest_root / "2020").mkdir()
-    (dest_root / "2020" / dest_base).write_bytes(b"dest")
+    (dest_root / "2020" / "01").mkdir(parents=True)
+    (dest_root / "2020" / "01" / dest_base).write_bytes(b"dest")
 
     src = src_root / "other.jpg"
     src.write_bytes(b"other")
