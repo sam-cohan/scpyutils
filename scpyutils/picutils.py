@@ -26,6 +26,7 @@ Author: Sam Cohan
 """
 
 import datetime
+import enum
 import filecmp
 import hashlib
 import json
@@ -128,9 +129,14 @@ DEST_LOGIC_VERSION = 1
 # Content fingerprinting: files larger than this use head+tail sampling (see below).
 DEFAULT_CONTENT_HASH_FULL_MAX_BYTES = 64 * 1024 * 1024
 DEFAULT_CONTENT_HASH_SAMPLE_BYTES = 4 * 1024 * 1024
-CONTENT_HASH_MODE_AUTO = "auto"
-CONTENT_HASH_MODE_FULL = "full"
-CONTENT_HASH_MODE_SAMPLE = "sample"
+class ContentHashMode(str, enum.Enum):
+    AUTO = "auto"
+    FULL = "full"
+    SAMPLE = "sample"
+
+CONTENT_HASH_MODE_AUTO = ContentHashMode.AUTO
+CONTENT_HASH_MODE_FULL = ContentHashMode.FULL
+CONTENT_HASH_MODE_SAMPLE = ContentHashMode.SAMPLE
 CONTENT_HASH_ALGORITHM = "xxh64"
 _CONTENT_FP_CACHE_VERSION = 1
 _CONTENT_FP_CACHE_DIR = "./.cache"
@@ -141,11 +147,22 @@ _CONTENT_FP_CACHE_FILENAME = "picutils_content_fp.json"
 # Default ``iso_geo_hash``: ``{YYYYMMDD}_{HHMMSS}{±HHMM}__{geo}__{hash16}.{ext}`` (offset always present)
 # ``content_only``: ``{hash_16}.{ext}`` (hash-only filename; same bytes → one name)
 # ``capture_content``: legacy ``{YYYYMMDD}_{HHMMSS}[__{loc}][__{orig}][__{hash_16}].{ext}``
-DEST_NAME_MODE_ISO_GEO_HASH = "iso_geo_hash"
-DEST_NAME_MODE_CONTENT_ONLY = "content_only"
-DEST_NAME_MODE_CAPTURE_CONTENT = "capture_content"
+class DestNameMode(str, enum.Enum):
+    ISO_GEO_HASH = "iso_geo_hash"
+    CONTENT_ONLY = "content_only"
+    CAPTURE_CONTENT = "capture_content"
+
+DEST_NAME_MODE_ISO_GEO_HASH = DestNameMode.ISO_GEO_HASH
+DEST_NAME_MODE_CONTENT_ONLY = DestNameMode.CONTENT_ONLY
+DEST_NAME_MODE_CAPTURE_CONTENT = DestNameMode.CAPTURE_CONTENT
 # Separator between capture / geo / hash segments in destination basenames.
 DEST_FILENAME_FIELD_SEP = "__"
+
+
+class TransferMode(str, enum.Enum):
+    MOVE = "move"
+    COPY = "copy"
+
 
 _LIVE_PHOTO_EXTS = {".heic", ".mov"}
 
@@ -498,33 +515,24 @@ def _file_sample_fingerprint(
 def _file_content_fingerprint(
     path: str,
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> Tuple[Optional[str], str]:
     """Return ``(hex_digest, method)`` where ``method`` is ``full`` or ``sample``."""
-    if content_hash_mode not in (
-        CONTENT_HASH_MODE_AUTO,
-        CONTENT_HASH_MODE_FULL,
-        CONTENT_HASH_MODE_SAMPLE,
-    ):
-        raise ValueError(
-            f"content_hash_mode={content_hash_mode!r} must be "
-            f"{CONTENT_HASH_MODE_AUTO!r}, {CONTENT_HASH_MODE_FULL!r}, or "
-            f"{CONTENT_HASH_MODE_SAMPLE!r}"
-        )
-    if content_hash_mode == CONTENT_HASH_MODE_FULL:
-        return _file_full_hash(path), CONTENT_HASH_MODE_FULL
-    if content_hash_mode == CONTENT_HASH_MODE_SAMPLE:
-        return _file_sample_fingerprint(path, sample_bytes=sample_bytes), CONTENT_HASH_MODE_SAMPLE
+    content_hash_mode = ContentHashMode(content_hash_mode)
+    if content_hash_mode == ContentHashMode.FULL:
+        return _file_full_hash(path), ContentHashMode.FULL
+    if content_hash_mode == ContentHashMode.SAMPLE:
+        return _file_sample_fingerprint(path, sample_bytes=sample_bytes), ContentHashMode.SAMPLE
     size = _file_size(path)
     if size is None:
-        return None, CONTENT_HASH_MODE_FULL
+        return None, ContentHashMode.FULL
     if size <= full_max_bytes:
-        return _file_full_hash(path), CONTENT_HASH_MODE_FULL
+        return _file_full_hash(path), ContentHashMode.FULL
     return (
         _file_sample_fingerprint(path, sample_bytes=sample_bytes),
-        CONTENT_HASH_MODE_SAMPLE,
+        ContentHashMode.SAMPLE,
     )
 
 
@@ -571,7 +579,7 @@ def _persist_content_fp_cache() -> None:
 def _get_content_fingerprint(
     path: str,
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
     use_cache: bool = True,
@@ -627,7 +635,7 @@ def _files_are_identical(
     path_a: str,
     path_b: str,
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> bool:
@@ -639,18 +647,18 @@ def _files_are_identical(
         size_b = os.path.getsize(path_b)
         if size_a != size_b:
             return False
-        if content_hash_mode == CONTENT_HASH_MODE_FULL or (
-            content_hash_mode == CONTENT_HASH_MODE_AUTO and size_a <= full_max_bytes
+        if content_hash_mode == ContentHashMode.FULL or (
+            content_hash_mode == ContentHashMode.AUTO and size_a <= full_max_bytes
         ):
             return filecmp.cmp(path_a, path_b, shallow=False)
         fp_a, _ = _get_content_fingerprint(
             path_a,
-            content_hash_mode=CONTENT_HASH_MODE_SAMPLE,
+            content_hash_mode=ContentHashMode.SAMPLE,
             sample_bytes=sample_bytes,
         )
         fp_b, _ = _get_content_fingerprint(
             path_b,
-            content_hash_mode=CONTENT_HASH_MODE_SAMPLE,
+            content_hash_mode=ContentHashMode.SAMPLE,
             sample_bytes=sample_bytes,
         )
         return fp_a is not None and fp_a == fp_b
@@ -665,7 +673,7 @@ def _verified_dest_has_src_content(
     dest_content_hash: Optional[str],
     *,
     verify_transfers: bool,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> bool:
@@ -789,7 +797,7 @@ def _src_content_hash(
     src_metadata: dict,
     src_path: str,
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> Optional[str]:
@@ -812,7 +820,7 @@ def _src_content_hash(
 def _dest_content_fingerprint(
     dest_path: str,
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> Optional[str]:
@@ -832,7 +840,7 @@ def _files_content_identical(
     src_metadata: dict,
     dest_content_hash: Optional[str],
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> Optional[bool]:
@@ -875,7 +883,7 @@ def _collision_details(
     include_content_hash: bool = True,
     src_content_hash: Optional[str] = None,
     dest_content_hash: Optional[str] = None,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> dict:
@@ -935,7 +943,7 @@ def _safe_transfer(
     *,
     verify: bool = True,
     is_move: bool = False,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> str:
@@ -1019,7 +1027,7 @@ def _transfer_live_companion(
     processed_srcs: Set[str],
     counters: dict,
     dry_run: bool,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
     is_move: bool = True,
@@ -1079,7 +1087,7 @@ def get_content_hash_for_dest(
     file_path: str,
     content_hash: Optional[str] = None,
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> Optional[str]:
@@ -1412,10 +1420,6 @@ def get_capture_dt_parts_from_metadata(metadata: dict) -> Optional[dict]:
             parts_list.extend(_collect_dynamic_capture_dt_parts(metadata))
         if parts_list:
             return min(parts_list, key=lambda p: p["utc"])
-    print(
-        "ERROR: Failed to extract create_dt from metadata; "
-        f"tried tiers={_CREATE_DT_TIERS}, SourceFile={metadata.get('SourceFile')}"
-    )
     return None
 
 
@@ -1507,23 +1511,23 @@ def _build_dest_file_base(
     ext_lower: str,
     loc: str,
     content_hash_for_dest: Optional[str],
-    dest_name_mode: str,
+    dest_name_mode: DestNameMode,
     base_name: str,
     include_content_hash_in_dest: bool,
     include_orig_name_in_dest: bool,
 ) -> str:
     """Build ``DestFileBase`` from capture time, geo slot, and content hash."""
     iso = _capture_iso_for_filename(local_dt, tz_suffix)
-    if dest_name_mode == DEST_NAME_MODE_ISO_GEO_HASH:
+    if dest_name_mode == DestNameMode.ISO_GEO_HASH:
         parts = [iso, loc]
         if include_content_hash_in_dest and content_hash_for_dest:
             parts.append(content_hash_for_dest)
         return f"{DEST_FILENAME_FIELD_SEP.join(parts)}.{ext_lower}"
-    if dest_name_mode == DEST_NAME_MODE_CONTENT_ONLY:
+    if dest_name_mode == DestNameMode.CONTENT_ONLY:
         if content_hash_for_dest:
             return f"{content_hash_for_dest}.{ext_lower}"
         return f"{iso}.{ext_lower}"
-    if dest_name_mode == DEST_NAME_MODE_CAPTURE_CONTENT:
+    if dest_name_mode == DestNameMode.CAPTURE_CONTENT:
         parts = [_capture_iso_for_filename(local_dt, tz_suffix)]
         if loc:
             parts.append(loc)
@@ -1545,8 +1549,8 @@ def augment_metadata_for_dest(
     include_content_hash_in_dest: bool = True,
     include_orig_name_in_dest: bool = False,
     include_metadata_hash_in_dest: Optional[bool] = None,
-    dest_name_mode: str = DEST_NAME_MODE_ISO_GEO_HASH,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    dest_name_mode: DestNameMode = DestNameMode.ISO_GEO_HASH,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     content_hash_full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     content_hash_sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
     _geo_lookup: Optional[Dict[Tuple[float, float], str]] = None,
@@ -1595,7 +1599,7 @@ def augment_metadata_for_dest(
     capture_date_source = "metadata"
     tz_suffix = ""
     tz_source = ""
-    if capture_parts is not None:
+    if capture_parts is not None and capture_parts["utc"].year >= SUSPECT_DT_MIN_YEAR:
         create_dt = capture_parts["utc"]
         local_dt = capture_parts["local"]
         tz_suffix = capture_parts.get("tz_suffix") or ""
@@ -1607,7 +1611,19 @@ def augment_metadata_for_dest(
     else:
         create_dt = pd.Timestamp(get_file_create_date(file_path))
         local_dt = create_dt
-        capture_date_source = "file_mtime"
+        if capture_parts is not None:
+            capture_date_source = "metadata_suspect_used_mtime"
+            print(
+                f"WARNING: EXIF date {capture_parts['utc']} is before "
+                f"{SUSPECT_DT_MIN_YEAR}, using file mtime; "
+                f"SourceFile={metadata.get('SourceFile')}"
+            )
+        else:
+            capture_date_source = "file_mtime"
+            print(
+                "WARNING: No valid capture date in metadata, using file mtime; "
+                f"SourceFile={metadata.get('SourceFile')}"
+            )
         tz_suffix = "+0000"
         tz_source = "file_mtime"
     base_name, ext = os.path.basename(file_path).rsplit(".", 1)
@@ -1623,8 +1639,13 @@ def augment_metadata_for_dest(
     metadata["CaptureTzSuffix"] = tz_suffix
     metadata["CaptureTzSource"] = tz_source
     metadata["CaptureDateSource"] = capture_date_source
-    metadata["DestYear"] = local_dt.strftime("%Y")
-    metadata["DestMonth"] = local_dt.strftime("%m")
+    year_str = local_dt.strftime("%Y")
+    month_str = local_dt.strftime("%m")
+    is_suspect = capture_date_source != "metadata"
+    if is_suspect:
+        year_str = os.path.join(SUSPECT_DT_SUBDIR, year_str)
+    metadata["DestYear"] = year_str
+    metadata["DestMonth"] = month_str
     metadata["CaptureIsoForDest"] = _capture_iso_for_filename(local_dt, tz_suffix)
     content_hash, content_hash_method = _get_content_fingerprint(
         file_path,
@@ -1680,8 +1701,8 @@ def augment_metadatas_for_dest(
     include_content_hash_in_dest: bool = True,
     include_orig_name_in_dest: bool = False,
     include_metadata_hash_in_dest: Optional[bool] = None,
-    dest_name_mode: str = DEST_NAME_MODE_ISO_GEO_HASH,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    dest_name_mode: DestNameMode = DestNameMode.ISO_GEO_HASH,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     content_hash_full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     content_hash_sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
     progress: bool = True,
@@ -1779,7 +1800,7 @@ def _compute_preflight_counts(
     dest_root_dir: str,
     metadata_by_path: Dict[str, dict],
     *,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
     progress: bool = True,
@@ -1823,7 +1844,7 @@ def _compute_preflight_counts(
 
 def _mode_action_label(move_or_copy: str, *, past: bool = False) -> str:
     """Return ``move``/``moved`` or ``copy``/``copied`` for user-facing messages."""
-    if move_or_copy == "move":
+    if move_or_copy == TransferMode.MOVE:
         return "moved" if past else "move"
     return "copied" if past else "copy"
 
@@ -1833,7 +1854,7 @@ def _print_mode_banner(
 ) -> None:
     """Print how this run treats sources vs the library."""
     mode = move_or_copy.upper()
-    if move_or_copy == "move":
+    if move_or_copy == TransferMode.MOVE:
         behavior = (
             "rename (same FS) or copy+verify+trash (cross FS) each source into the library"
         )
@@ -1914,7 +1935,7 @@ def _summarize_run_rows(rows: List[dict], *, dry_run: bool = False) -> dict:
         "other": 0,
     }
     for row in rows:
-        if row.get("warning") == "NO_CAPTURE_DATE_USED_MTIME":
+        if row.get("warning") in ("NO_CAPTURE_DATE_USED_MTIME", "SUSPECT_CAPTURE_DATE"):
             summary["mtime_fallback"] += 1
         st = row.get("status") or ""
         if st in _NEW_LIBRARY_STATUSES:
@@ -1993,12 +2014,12 @@ def _print_run_summary(
         line("Would keep at source", s["dry_run_would_keep"] + s["duplicate_kept"])
     else:
         print(f"    {'Added (new):':<26} {s['new_to_library']:>8,}")
-        if move_or_copy == "move":
+        if move_or_copy == TransferMode.MOVE:
             line("  → renamed (same FS)", new_renamed, indent=2)
             line("  → copied + trashed", new_trashed, indent=2)
         print(f"    {'Duplicates (same bytes):':<26} {duplicates:>8,}")
         if duplicates:
-            if move_or_copy == "move":
+            if move_or_copy == TransferMode.MOVE:
                 line("  → Trash", s["duplicate_trashed"], indent=2)
                 line("  → kept at source", s["duplicate_kept"], indent=2)
             else:
@@ -2011,9 +2032,9 @@ def _print_run_summary(
             line(f"  → {q_label.lower()}", s["collision_quarantined"], indent=2)
             line("  → logged only", s["collision_logged"], indent=2)
 
-    if not dry_run and move_or_copy == "move" and sent_to_trash:
+    if not dry_run and move_or_copy == TransferMode.MOVE and sent_to_trash:
         print(f"\n  Total sent to Trash:      {sent_to_trash:>8,}")
-    if not dry_run and move_or_copy == "copy" and sources_left:
+    if not dry_run and move_or_copy == TransferMode.COPY and sources_left:
         print(f"\n  Sources left on disk:     {sources_left:>8,}")
 
     problems = s["src_missing"] + s["errors"] + s["other"]
@@ -2056,7 +2077,7 @@ def _process_one_source(
     counters: dict,
     dest_content_hash: Optional[str],
     group_content_hashes: Set[str],
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> dict:
@@ -2073,6 +2094,8 @@ def _process_one_source(
     )
     if src_metadata.get("CaptureDateSource") == "file_mtime":
         row["warning"] = "NO_CAPTURE_DATE_USED_MTIME"
+    elif src_metadata.get("CaptureDateSource") == "metadata_suspect_used_mtime":
+        row["warning"] = "SUSPECT_CAPTURE_DATE"
 
     if not os.path.exists(src_file_path):
         row["status"] = "SRC_MISSING"
@@ -2348,23 +2371,263 @@ def _process_one_source(
     return _log_event(log_file, row, session)
 
 
+SUSPECT_DT_SUBDIR = "_suspect_dt"
+SUSPECT_DT_MIN_YEAR = 2001  # EXIF dates before this are treated as suspect (epoch, factory reset)
+
+
+def _is_suspect_capture_dt(metadata: dict) -> bool:
+    """Return True if the capture date is missing or implausibly old."""
+    create_dt = get_create_dt_from_metadata(metadata)
+    if create_dt is None:
+        return True
+    try:
+        if create_dt.year < SUSPECT_DT_MIN_YEAR:
+            return True
+    except Exception:
+        return True
+    return False
+
+
+def move_suspect_dt_files(
+    library_dir: str,
+    dest_dir: str,
+    *,
+    dry_run: bool = True,
+    progress: bool = True,
+) -> List[dict]:
+    """Extract files from ``{library_dir}/_suspect_dt/`` to a separate folder.
+
+    Use this to move suspect-date files out of the library for manual review
+    or archival.  The year/month structure is preserved:
+    ``{library_dir}/_suspect_dt/YYYY/MM/file`` → ``{dest_dir}/YYYY/MM/file``.
+
+    Empty directories left behind in ``_suspect_dt/`` are cleaned up unless
+    *dry_run* is True.
+
+    Returns a list of dicts with ``src``, ``dest``, and ``status`` keys.
+    """
+    suspect_root = os.path.join(library_dir, SUSPECT_DT_SUBDIR)
+    if not os.path.isdir(suspect_root):
+        print(f"No {SUSPECT_DT_SUBDIR}/ directory found under {library_dir}")
+        return []
+
+    files: List[str] = []
+    for dirpath, _dirnames, filenames in os.walk(suspect_root):
+        for fname in filenames:
+            files.append(os.path.join(dirpath, fname))
+
+    if not files:
+        print(f"{SUSPECT_DT_SUBDIR}/ exists but contains no files.")
+        return []
+
+    print(f"Found {len(files):,} suspect-dt files to {'preview' if dry_run else 'move'}.")
+    rows: List[dict] = []
+    for src in _iter_progress(files, progress=progress, desc="suspect_dt", total=len(files)):
+        rel = os.path.relpath(src, suspect_root)
+        dest = os.path.join(dest_dir, rel)
+        row: dict = {"src": src, "dest": dest, "status": ""}
+        if dry_run:
+            row["status"] = "WOULD_MOVE"
+        else:
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                if _same_filesystem(src, os.path.dirname(dest)):
+                    os.rename(src, dest)
+                    row["status"] = "RENAMED"
+                else:
+                    shutil.copy2(src, dest)
+                    os.remove(src)
+                    row["status"] = "MOVED"
+            except OSError as exc:
+                row["status"] = "ERROR"
+                row["error"] = str(exc)
+        rows.append(row)
+
+    if not dry_run:
+        for dirpath, _dn, filenames in os.walk(suspect_root, topdown=False):
+            if not filenames:
+                try:
+                    os.rmdir(dirpath)
+                except OSError:
+                    pass
+
+    moved = sum(1 for r in rows if r["status"] in ("RENAMED", "MOVED"))
+    errors = sum(1 for r in rows if r["status"] == "ERROR")
+    label = "Would move" if dry_run else "Moved"
+    print(f"{label}: {moved:,} files.  Errors: {errors:,}")
+    return rows
+
+
+def relocate_suspect_dt_files(
+    library_dir: str,
+    *,
+    log_file_path: Optional[str] = None,
+    refresh_metacache: bool = False,
+    dry_run: bool = True,
+    progress: bool = True,
+) -> List[dict]:
+    """**One-time migration**: move files with suspect capture dates into ``_suspect_dt/``.
+
+    Use this to clean up a library built by an older version of
+    ``cleaup_media_files`` that did not route suspect dates automatically.
+    After running this once, it is no longer needed — subsequent
+    ``cleaup_media_files`` runs route suspect files to ``_suspect_dt/``
+    during ingest.
+
+    Scans every media file in the library via ExifTool (cached by
+    ``get_metadatas_mproc``) and checks whether a valid capture date exists
+    and is at least ``SUSPECT_DT_MIN_YEAR``.  Files that fail are moved to
+    ``{library_dir}/_suspect_dt/{YYYY}/{MM}/``.
+
+    Files already under ``_suspect_dt/`` are skipped.  Each operation is
+    logged to ``{library_dir}/log.txt`` (or *log_file_path*) in the same
+    JSON-lines format used by ``cleaup_media_files``.
+
+    Args:
+        library_dir: Root of the organized library (``dest_root_dir``).
+        log_file_path: Path to the log file.  Defaults to ``{library_dir}/log.txt``.
+        refresh_metacache: Force re-read of ExifTool metadata.
+        dry_run: Preview only — print what would move but don't touch files.
+        progress: Show progress bars.
+
+    Returns:
+        List of dicts with ``src``, ``dest``, ``status`` keys.
+    """
+    library_abs = os.path.abspath(library_dir)
+    suspect_prefix = os.path.join(library_abs, SUSPECT_DT_SUBDIR) + os.sep
+    log_file_path = log_file_path or os.path.join(library_abs, "log.txt")
+
+    candidates = _suspect_candidates_from_metadata(
+        library_abs, suspect_prefix,
+        refresh_metacache=refresh_metacache, progress=progress,
+    )
+
+    if not candidates:
+        print("No suspect-dt files found in main library folders.")
+        return []
+
+    print(
+        f"Found {len(candidates):,} suspect-dt files in main library "
+        f"({'preview' if dry_run else 'relocating'})."
+    )
+
+    session = _make_session(dry_run=dry_run, move_or_copy="relocate_suspect_dt")
+    rows: List[dict] = []
+    with open(log_file_path, "a") as log_file:
+        for src in _iter_progress(candidates, progress=progress, desc="relocate", total=len(candidates)):
+            rel = os.path.relpath(src, library_abs)
+            dest = os.path.join(library_abs, SUSPECT_DT_SUBDIR, rel)
+            row: dict = {"src": src, "dest": dest, "status": ""}
+            if dry_run:
+                row["status"] = "WOULD_RELOCATE_SUSPECT"
+            else:
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    if _same_filesystem(src, os.path.dirname(dest)):
+                        os.rename(src, dest)
+                        row["status"] = "RELOCATED_SUSPECT_RENAMED"
+                    else:
+                        shutil.copy2(src, dest)
+                        os.remove(src)
+                        row["status"] = "RELOCATED_SUSPECT_MOVED"
+                except OSError as exc:
+                    row["status"] = "ERROR"
+                    row["error"] = str(exc)
+            _log_event(log_file, row, session)
+            rows.append(row)
+
+    _print_relocate_summary(rows, dry_run=dry_run, library_dir=library_abs, log_file_path=log_file_path)
+    return rows
+
+
+def _print_relocate_summary(
+    rows: List[dict],
+    *,
+    dry_run: bool,
+    library_dir: str,
+    log_file_path: str,
+) -> None:
+    """Print a boxed summary for ``relocate_suspect_dt_files``."""
+    run_kind = "DRY RUN" if dry_run else "LIVE"
+    renamed = sum(1 for r in rows if r.get("status") == "RELOCATED_SUSPECT_RENAMED")
+    moved = sum(1 for r in rows if r.get("status") == "RELOCATED_SUSPECT_MOVED")
+    would = sum(1 for r in rows if r.get("status") == "WOULD_RELOCATE_SUSPECT")
+    errors = sum(1 for r in rows if r.get("status") == "ERROR")
+    total_relocated = renamed + moved
+
+    bar = "=" * 56
+    print(f"\n{bar}")
+    print(f"Relocate suspect-dt summary ({run_kind})")
+    print(bar)
+    print(f"  Library:  {library_dir}")
+    print(f"  Dest:     {os.path.join(library_dir, SUSPECT_DT_SUBDIR)}/")
+    print(f"  Candidates scanned:       {len(rows):>8,}")
+    if dry_run:
+        print(f"  Would relocate:           {would:>8,}")
+    else:
+        print(f"  Relocated:                {total_relocated:>8,}")
+        if renamed:
+            print(f"    → renamed (same FS):    {renamed:>8,}")
+        if moved:
+            print(f"    → copied + removed:     {moved:>8,}")
+    if errors:
+        print(f"  Errors:                   {errors:>8,}")
+    print(f"\n  Log: {log_file_path}")
+    print(bar)
+
+
+def _suspect_candidates_from_metadata(
+    library_abs: str,
+    suspect_prefix: str,
+    *,
+    refresh_metacache: bool = False,
+    progress: bool = True,
+) -> List[str]:
+    """Return library file paths that have no valid capture date in metadata."""
+    suspect_root = os.path.join(library_abs, SUSPECT_DT_SUBDIR)
+    exclude_roots = _normalize_exclude_roots([suspect_root])
+
+    print("Scanning library for media files...")
+    file_paths = sorted(
+        get_all_media_file_paths(library_abs, exclude_dirs=exclude_roots, progress=progress)
+    )
+    if not file_paths:
+        print("No media files found in library.")
+        return []
+    print(f"Found {len(file_paths):,} media files. Extracting metadata (cached if available)...")
+
+    metadatas = get_metadatas_mproc(
+        file_paths,
+        dest_logic_version=DEST_LOGIC_VERSION if not refresh_metacache else -1,
+    )
+
+    suspect_files: List[str] = []
+    for md in _iter_progress(metadatas, progress=progress, desc="checking dates", total=len(metadatas)):
+        src = md.get("SourceFile", "")
+        if not src or src.startswith(suspect_prefix):
+            continue
+        if _is_suspect_capture_dt(md):
+            suspect_files.append(src)
+    return suspect_files
+
+
 def cleaup_media_files(
     src_root_dir: str,
     dest_root_dir: str,
     dry_run: bool = True,
     refresh_metacache: bool = False,
-    move_or_copy: str = "move",
+    move_or_copy: TransferMode = TransferMode.MOVE,
     log_file_path: str = None,
     verbose_collisions: bool = False,
     include_content_hash_in_dest: bool = True,
     include_orig_name_in_dest: bool = False,
     include_metadata_hash_in_dest: Optional[bool] = None,
-    dest_name_mode: str = DEST_NAME_MODE_ISO_GEO_HASH,
+    dest_name_mode: DestNameMode = DestNameMode.ISO_GEO_HASH,
     collisions_dir: Optional[str] = None,
     exclude_dirs: Optional[List[str]] = None,
     progress: bool = True,
     verify_transfers: bool = True,
-    content_hash_mode: str = CONTENT_HASH_MODE_AUTO,
+    content_hash_mode: ContentHashMode = ContentHashMode.AUTO,
     content_hash_full_max_bytes: int = DEFAULT_CONTENT_HASH_FULL_MAX_BYTES,
     content_hash_sample_bytes: int = DEFAULT_CONTENT_HASH_SAMPLE_BYTES,
 ) -> List[dict]:
@@ -2389,10 +2652,10 @@ def cleaup_media_files(
         dry_run: If True, do not move/copy or create dirs (still writes log rows).
         refresh_metacache: If True, re-run ExifTool and replace the on-disk cache
             (use when files are new/updated; not needed for date/naming logic changes).
-        move_or_copy: ``"move"`` or ``"copy"``. On the same filesystem, **move** uses
-            ``os.rename()`` (instant, atomic). Cross-filesystem moves copy bytes with
-            hash verification, then send the source to **Trash** (``send2trash``).
-            **Copy** always copies bytes and leaves sources on disk.
+        move_or_copy: ``TransferMode.MOVE`` or ``TransferMode.COPY``. On the same
+            filesystem, **move** uses ``os.rename()`` (instant, atomic). Cross-filesystem
+            moves copy bytes with hash verification, then send the source to **Trash**
+            (``send2trash``). **Copy** always copies bytes and leaves sources on disk.
         include_content_hash_in_dest: When ``dest_name_mode="capture_content"``, append
             content hash (16 hex chars of xxHash64) to the capture-based filename.
         include_orig_name_in_dest: Include original basename (``capture_content`` only).
@@ -2400,8 +2663,8 @@ def cleaup_media_files(
         dest_name_mode: ``iso_geo_hash`` (default): ISO-like capture time, optional geo,
             then hash in the filename. ``content_only``: ``{hash_16}.{ext}`` only.
             ``capture_content``: legacy capture/location/hash pattern.
-        collisions_dir: If set and ``move_or_copy`` is ``"move"``, when the destination
-            exists with different content, move the source here for manual review.
+        collisions_dir: If set and ``move_or_copy`` is ``TransferMode.MOVE``, when the
+            destination exists with different content, move the source here for review.
         exclude_dirs: Extra directory trees to exclude from the source scan. ``dest_root_dir``
             and ``collisions_dir`` are always excluded.
         progress: Show progress bars during scan and transfer.
@@ -2423,13 +2686,10 @@ def cleaup_media_files(
         Every row is appended to the cleanup log file (including dry runs).
 
     Raises:
-        AssertionError: If ``move_or_copy`` is not ``"move"`` or ``"copy"``.
+        ValueError: If ``move_or_copy`` is not a valid ``TransferMode``.
     """
-    assert move_or_copy in [
-        "move",
-        "copy",
-    ], f"move_or_copy='{move_or_copy}' must be 'move' or 'copy"
-    is_move = move_or_copy == "move"
+    move_or_copy = TransferMode(move_or_copy)
+    is_move = move_or_copy == TransferMode.MOVE
     session = _make_session(dry_run=dry_run, move_or_copy=move_or_copy)
     if collisions_dir and not is_move:
         print(

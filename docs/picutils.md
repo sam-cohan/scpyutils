@@ -241,6 +241,16 @@ Capture time comes from a tiered ExifTool tag search (earliest valid value wins 
 
 **Folders and ISO filenames** use **local wall time** at the photo: explicit offsets on the tag (e.g. `EXIF:OffsetTimeOriginal`, Apple `QuickTime:CreationDate`), or GPS + `timezonefinder` when EXIF is naive. Capture time in filenames is always ``YYYYMMDD_HHMMSS±HHMM`` (no underscore before the offset). Offsets come from EXIF/tag, GPS-inferred zone, or ``+0000`` when unknown (including file-mtime fallback). `CaptureDtUtc` is still stored for sorting and logs.
 
+### Suspect capture dates (`_suspect_dt/`)
+
+When no valid capture date tag is found in the metadata, the file's filesystem modification time is used as a fallback (`CaptureDateSource="file_mtime"`). These files are routed to a **`_suspect_dt/`** subtree within the library instead of the main year/month folders:
+
+```
+{dest_root}/_suspect_dt/{YYYY}/{MM}/{filename}
+```
+
+This keeps files with unreliable dates separate from the main library for manual review, preventing them from polluting year/month folders with potentially incorrect dates.
+
 ## Run summary
 
 At the end of each run, a boxed **run summary** is printed to stdout (counts come from `log.txt` rows):

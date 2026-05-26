@@ -265,7 +265,7 @@ def test_dest_filename_content_only_mode(tmp_path):
         "EXIF:DateTimeOriginal": "2020:01:01 12:00:00",
     }
     picu.augment_metadata_for_dest(
-        metadata, dest_name_mode=picu.DEST_NAME_MODE_CONTENT_ONLY
+        metadata, dest_name_mode=picu.DestNameMode.CONTENT_ONLY
     )
     assert metadata["DestFileBase"] == f"{content_hash}.jpg"
 
@@ -278,8 +278,8 @@ def test_same_bytes_same_dest_name_different_capture_tags(tmp_path):
     b.write_bytes(b"same-payload")
     meta_a = {"SourceFile": str(a), "EXIF:DateTimeOriginal": "2020:01:01 12:00:00"}
     meta_b = {"SourceFile": str(b), "EXIF:DateTimeOriginal": "2021:06:15 08:30:00"}
-    picu.augment_metadata_for_dest(meta_a, dest_name_mode=picu.DEST_NAME_MODE_CONTENT_ONLY)
-    picu.augment_metadata_for_dest(meta_b, dest_name_mode=picu.DEST_NAME_MODE_CONTENT_ONLY)
+    picu.augment_metadata_for_dest(meta_a, dest_name_mode=picu.DestNameMode.CONTENT_ONLY)
+    picu.augment_metadata_for_dest(meta_b, dest_name_mode=picu.DestNameMode.CONTENT_ONLY)
     assert meta_a["DestFileBase"] == meta_b["DestFileBase"]
 
 
@@ -296,6 +296,7 @@ def test_augment_metadata_mtime_fallback(tmp_path):
     assert metadata["CaptureDateSource"] == "file_mtime"
     assert metadata["CaptureTzSuffix"] == "+0000"
     assert "+0000" in metadata["DestFileBase"]
+    assert metadata["DestYear"].startswith("_suspect_dt/")
 
 
 def _reset_content_fp_cache():
@@ -320,11 +321,11 @@ def test_large_file_uses_sample_fingerprint(tmp_path):
 
     digest, method = picu._file_content_fingerprint(
         str(path),
-        content_hash_mode=picu.CONTENT_HASH_MODE_AUTO,
+        content_hash_mode=picu.ContentHashMode.AUTO,
         full_max_bytes=256,
         sample_bytes=64,
     )
-    assert method == picu.CONTENT_HASH_MODE_SAMPLE
+    assert method == picu.ContentHashMode.SAMPLE
     assert digest == picu._file_sample_fingerprint(str(path), sample_bytes=64)
     assert digest != picu._file_full_hash(str(path))
 
@@ -338,7 +339,7 @@ def test_sample_fingerprint_matches_identical_large_files(tmp_path):
     assert picu._files_are_identical(
         str(a),
         str(b),
-        content_hash_mode=picu.CONTENT_HASH_MODE_AUTO,
+        content_hash_mode=picu.ContentHashMode.AUTO,
         full_max_bytes=64,
         sample_bytes=32,
     )
@@ -455,7 +456,7 @@ def test_cleaup_processes_all_sources_in_group(
             str(src_root),
             str(dest_root),
             dry_run=False,
-            move_or_copy="move",
+            move_or_copy=picu.TransferMode.MOVE,
             progress=False,
         )
     assert len(rows) == 2
@@ -486,7 +487,7 @@ def test_cleaup_copy_mode_identical_error(mock_mproc, mock_scan, _mock_augment, 
         str(src_root),
         str(dest_root),
         dry_run=False,
-        move_or_copy="copy",
+        move_or_copy=picu.TransferMode.COPY,
         progress=False,
     )
     assert rows[0]["status"] == "IDENTICAL_SOURCE_KEPT"
@@ -517,7 +518,7 @@ def test_cleaup_quarantine_collision(mock_mproc, mock_scan, _mock_augment, tmp_p
         str(src_root),
         str(dest_root),
         dry_run=False,
-        move_or_copy="move",
+        move_or_copy=picu.TransferMode.MOVE,
         collisions_dir=str(quarantine),
         progress=False,
     )
@@ -552,4 +553,71 @@ def test_cleaup_log_includes_session_fields(mock_mproc, mock_scan, _mock_augment
     row = json.loads(log_path.read_text().strip().splitlines()[-1])
     assert "run_id" in row
     assert row["dry_run"] is True
-    assert row["move_or_copy"] == "move"
+    assert row["move_or_copy"] == picu.TransferMode.MOVE
+
+
+def test_move_suspect_dt_files_dry_and_live(tmp_path):
+    library = tmp_path / "library"
+    suspect = library / "_suspect_dt" / "2019" / "01"
+    suspect.mkdir(parents=True)
+    (suspect / "photo.jpg").write_bytes(b"suspect")
+
+    dest = tmp_path / "review"
+
+    rows_dry = picu.move_suspect_dt_files(str(library), str(dest), dry_run=True, progress=False)
+    assert len(rows_dry) == 1
+    assert rows_dry[0]["status"] == "WOULD_MOVE"
+    assert (suspect / "photo.jpg").exists()
+
+    rows_live = picu.move_suspect_dt_files(str(library), str(dest), dry_run=False, progress=False)
+    assert len(rows_live) == 1
+    assert rows_live[0]["status"] in ("RENAMED", "MOVED")
+    assert os.path.exists(os.path.join(str(dest), "2019", "01", "photo.jpg"))
+    assert not (suspect / "photo.jpg").exists()
+    assert not (library / "_suspect_dt").exists()
+
+
+@patch.object(picu, "_is_suspect_capture_dt")
+@patch.object(picu, "get_metadatas_mproc")
+@patch.object(picu, "get_all_media_file_paths")
+def test_relocate_suspect_dt_files(mock_scan, mock_mproc, mock_suspect, tmp_path):
+    library = tmp_path / "lib"
+    sub = library / "2019" / "01"
+    sub.mkdir(parents=True)
+    good = sub / "good.jpg"
+    good.write_bytes(b"good")
+    bad = sub / "bad.jpg"
+    bad.write_bytes(b"bad")
+
+    mock_scan.return_value = [str(good), str(bad)]
+    mock_mproc.return_value = [
+        {"SourceFile": str(good)},
+        {"SourceFile": str(bad)},
+    ]
+    mock_suspect.side_effect = lambda md: "bad" in md["SourceFile"]
+
+    log_path = library / "log.txt"
+    rows = picu.relocate_suspect_dt_files(
+        str(library), log_file_path=str(log_path), dry_run=True, progress=False,
+    )
+    assert len(rows) == 1
+    assert rows[0]["src"] == str(bad)
+    assert rows[0]["status"] == "WOULD_RELOCATE_SUSPECT"
+    assert bad.exists()
+
+    rows = picu.relocate_suspect_dt_files(
+        str(library), log_file_path=str(log_path), dry_run=False, progress=False,
+    )
+    assert len(rows) == 1
+    assert rows[0]["status"] in ("RELOCATED_SUSPECT_RENAMED", "RELOCATED_SUSPECT_MOVED")
+    assert not bad.exists()
+    expected = library / "_suspect_dt" / "2019" / "01" / "bad.jpg"
+    assert expected.exists()
+    assert good.exists()
+    log_lines = log_path.read_text().strip().splitlines()
+    assert len(log_lines) == 2
+    log_row = json.loads(log_lines[-1])
+    assert log_row["src"] == str(bad)
+    assert "run_id" in log_row
+    assert "logged_at" in log_row
+    assert log_row["move_or_copy"] == "relocate_suspect_dt"
