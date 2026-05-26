@@ -1868,7 +1868,7 @@ def _print_preflight_summary(
         )
 
 
-_NEW_LIBRARY_ERRORS = frozenset(
+_NEW_LIBRARY_STATUSES = frozenset(
     {
         "TRANSFERRED_SOURCE_DELETED",
         "TRANSFERRED_SOURCE_RENAMED",
@@ -1876,21 +1876,24 @@ _NEW_LIBRARY_ERRORS = frozenset(
         "TRANSFERRED_SOURCE_KEPT_UNVERIFIED",
     }
 )
-_DUPLICATE_TRASHED_ERRORS = frozenset({"IDENTICAL_SOURCE_DELETED"})
-_DUPLICATE_KEPT_ERRORS = frozenset(
+_DUPLICATE_TRASHED_STATUSES = frozenset({"IDENTICAL_SOURCE_DELETED"})
+_DUPLICATE_KEPT_STATUSES = frozenset(
     {
         "IDENTICAL_SOURCE_KEPT",
         "IDENTICAL_DESTINATION_EXISTS",
         "IDENTICAL_SOURCE_ALREADY_HANDLED",
     }
 )
-_COLLISION_QUARANTINE_ERRORS = frozenset(
+_COLLISION_QUARANTINE_STATUSES = frozenset(
     {"COLLISION_MOVED_TO_QUARANTINE", "COLLISION_WOULD_MOVE_TO_QUARANTINE"}
 )
-_COLLISION_LOGGED_ERRORS = frozenset({"DESTINATION_EXISTS"})
-_DRY_RUN_TRASH_ERRORS = frozenset({"SOURCE_WOULD_TRASH_AFTER_VERIFY"})
-_DRY_RUN_KEEP_ERRORS = frozenset({"SOURCE_WOULD_KEEP_AFTER_COPY"})
-_FAILURE_PREFIXES = ("SOURCE_TRASH_FAILED:", "SOURCE_DELETE_FAILED:", "QUARANTINE_FAILED:")
+_COLLISION_LOGGED_STATUSES = frozenset({"DESTINATION_EXISTS"})
+_DRY_RUN_TRASH_STATUSES = frozenset({"SOURCE_WOULD_TRASH_AFTER_VERIFY"})
+_DRY_RUN_KEEP_STATUSES = frozenset({"SOURCE_WOULD_KEEP_AFTER_COPY"})
+_FAILURE_STATUSES = frozenset(
+    {"SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED", "QUARANTINE_FAILED",
+     "TRANSFER_FAILED", "AUGMENT_FAILED", "SRC_MISSING"}
+)
 
 
 def _summarize_run_rows(rows: List[dict], *, dry_run: bool = False) -> dict:
@@ -1913,28 +1916,26 @@ def _summarize_run_rows(rows: List[dict], *, dry_run: bool = False) -> dict:
     for row in rows:
         if row.get("warning") == "NO_CAPTURE_DATE_USED_MTIME":
             summary["mtime_fallback"] += 1
-        err = row.get("error") or ""
-        if err in _NEW_LIBRARY_ERRORS:
+        st = row.get("status") or ""
+        if st in _NEW_LIBRARY_STATUSES:
             summary["new_to_library"] += 1
-        elif err in _DUPLICATE_TRASHED_ERRORS:
+        elif st in _DUPLICATE_TRASHED_STATUSES:
             summary["duplicate_trashed"] += 1
-        elif err in _DUPLICATE_KEPT_ERRORS:
+        elif st in _DUPLICATE_KEPT_STATUSES:
             summary["duplicate_kept"] += 1
-        elif err in _COLLISION_QUARANTINE_ERRORS:
+        elif st in _COLLISION_QUARANTINE_STATUSES:
             summary["collision_quarantined"] += 1
-        elif err in _COLLISION_LOGGED_ERRORS:
+        elif st in _COLLISION_LOGGED_STATUSES:
             summary["collision_logged"] += 1
-        elif err in _DRY_RUN_TRASH_ERRORS:
+        elif st in _DRY_RUN_TRASH_STATUSES:
             summary["dry_run_would_trash"] += 1
-        elif err in _DRY_RUN_KEEP_ERRORS:
+        elif st in _DRY_RUN_KEEP_STATUSES:
             summary["dry_run_would_keep"] += 1
-        elif err == "SRC_MISSING":
-            summary["src_missing"] += 1
-        elif err.startswith(_FAILURE_PREFIXES):
+        elif st in _FAILURE_STATUSES:
             summary["errors"] += 1
-        elif err == "" and dry_run:
+        elif st == "" and dry_run:
             summary["dry_run_would_copy"] += 1
-        elif err:
+        elif st:
             summary["other"] += 1
     return summary
 
@@ -1955,13 +1956,16 @@ def _print_run_summary(
     duplicates = s["duplicate_trashed"] + s["duplicate_kept"]
     collisions = s["collision_quarantined"] + s["collision_logged"]
     new_trashed = sum(
-        1 for r in rows if (r.get("error") or "") == "TRANSFERRED_SOURCE_DELETED"
+        1 for r in rows if (r.get("status") or "") == "TRANSFERRED_SOURCE_DELETED"
+    )
+    new_renamed = sum(
+        1 for r in rows if (r.get("status") or "") == "TRANSFERRED_SOURCE_RENAMED"
     )
     sent_to_trash = s["duplicate_trashed"] + new_trashed
     sources_left = sum(
         1
         for r in rows
-        if (r.get("error") or "")
+        if (r.get("status") or "")
         in (
             "TRANSFERRED_SOURCE_KEPT",
             "IDENTICAL_SOURCE_KEPT",
@@ -1988,9 +1992,10 @@ def _print_run_summary(
         line("Would send to Trash", s["dry_run_would_trash"])
         line("Would keep at source", s["dry_run_would_keep"] + s["duplicate_kept"])
     else:
-        print(f"    {'Added (new copies):':<26} {s['new_to_library']:>8,}")
+        print(f"    {'Added (new):':<26} {s['new_to_library']:>8,}")
         if move_or_copy == "move":
-            print(f"    {'Sent to Trash (new):':<26} {new_trashed:>8,}")
+            line("  → renamed (same FS)", new_renamed, indent=2)
+            line("  → copied + trashed", new_trashed, indent=2)
         print(f"    {'Duplicates (same bytes):':<26} {duplicates:>8,}")
         if duplicates:
             if move_or_copy == "move":
@@ -2070,7 +2075,7 @@ def _process_one_source(
         row["warning"] = "NO_CAPTURE_DATE_USED_MTIME"
 
     if not os.path.exists(src_file_path):
-        row["error"] = "SRC_MISSING"
+        row["status"] = "SRC_MISSING"
         counters["src_missing"] += 1
         return _log_event(log_file, row, session)
 
@@ -2142,7 +2147,7 @@ def _process_one_source(
                 full_max_bytes=full_max_bytes,
                 sample_bytes=sample_bytes,
             ):
-                row["error"] = _handle_source_after_verify(
+                row["status"] = _handle_source_after_verify(
                     src_file_path,
                     is_move=is_move,
                     dry_run=dry_run,
@@ -2150,14 +2155,15 @@ def _process_one_source(
                     processed_srcs=processed_srcs,
                     reason="identical",
                 )
-                if row["error"].startswith(("SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED")):
+                if row["status"].startswith(("SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED")):
+                    row["error"] = row["status"]
                     print(
                         f"unable to trash verified duplicate "
-                        f"src={src_file_path}: {row['error']}"
+                        f"src={src_file_path}: {row['status']}"
                     )
             else:
                 counters["identical_kept"] += 1
-                row["error"] = "IDENTICAL_DESTINATION_EXISTS"
+                row["status"] = "IDENTICAL_DESTINATION_EXISTS"
             if src_hash:
                 group_content_hashes.add(src_hash)
         else:
@@ -2202,19 +2208,20 @@ def _process_one_source(
                             reason="transfer",
                         )
                     counters["quarantine"] += 1
-                    row["error"] = "COLLISION_MOVED_TO_QUARANTINE"
+                    row["status"] = "COLLISION_MOVED_TO_QUARANTINE"
                     processed_srcs.add(src_file_path)
                 except Exception as e:
                     counters["unexpected"] += 1
                     counters["dest_exists"] += 1
-                    row["error"] = f"QUARANTINE_FAILED: {e}"
+                    row["status"] = "QUARANTINE_FAILED"
+                    row["error"] = str(e)
                     print(f"unable to quarantine src={src_file_path}: {e}")
             elif is_move and collisions_dir and dry_run:
                 counters["dest_exists"] += 1
-                row["error"] = "COLLISION_WOULD_MOVE_TO_QUARANTINE"
+                row["status"] = "COLLISION_WOULD_MOVE_TO_QUARANTINE"
             else:
                 counters["dest_exists"] += 1
-                row["error"] = "DESTINATION_EXISTS"
+                row["status"] = "DESTINATION_EXISTS"
         row = _log_event(log_file, row, session)
         if verbose_collisions:
             _print_destination_exists(row)
@@ -2242,7 +2249,7 @@ def _process_one_source(
                 full_max_bytes=full_max_bytes,
                 sample_bytes=sample_bytes,
             ):
-                row["error"] = _handle_source_after_verify(
+                row["status"] = _handle_source_after_verify(
                     src_file_path,
                     is_move=is_move,
                     dry_run=dry_run,
@@ -2250,21 +2257,22 @@ def _process_one_source(
                     processed_srcs=processed_srcs,
                     reason="identical",
                 )
-                if row["error"].startswith(("SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED")):
+                if row["status"].startswith(("SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED")):
+                    row["error"] = row["status"]
                     print(
                         f"unable to trash duplicate source "
-                        f"src={src_file_path}: {row['error']}"
+                        f"src={src_file_path}: {row['status']}"
                     )
             else:
                 counters["identical_kept"] += 1
-                row["error"] = "IDENTICAL_SOURCE_ALREADY_HANDLED"
+                row["status"] = "IDENTICAL_SOURCE_ALREADY_HANDLED"
             row = _log_event(log_file, row, session)
             if verbose_collisions:
                 _print_destination_exists(row)
             return row
 
     # 3) Destination missing → move/copy, verify, handle source.
-    error = ""
+    status = ""
     if not dry_run:
         try:
             method = _safe_transfer(
@@ -2282,9 +2290,9 @@ def _process_one_source(
             if method == "renamed":
                 processed_srcs.add(src_file_path)
                 counters["source_deleted"] += 1
-                error = "TRANSFERRED_SOURCE_RENAMED"
+                status = "TRANSFERRED_SOURCE_RENAMED"
             elif verify_transfers:
-                error = _handle_source_after_verify(
+                status = _handle_source_after_verify(
                     src_file_path,
                     is_move=is_move,
                     dry_run=False,
@@ -2292,15 +2300,16 @@ def _process_one_source(
                     processed_srcs=processed_srcs,
                     reason="transfer",
                 )
-                if error.startswith(("SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED")):
+                if status.startswith(("SOURCE_TRASH_FAILED", "SOURCE_DELETE_FAILED")):
+                    row["error"] = status
                     print(
                         f"unable to trash source after "
                         f"{_mode_action_label('move' if is_move else 'copy', past=True)} "
-                        f"src={src_file_path}: {error}"
+                        f"src={src_file_path}: {status}"
                     )
             else:
                 counters["source_kept_unverified"] += 1
-                error = "TRANSFERRED_SOURCE_KEPT_UNVERIFIED"
+                status = "TRANSFERRED_SOURCE_KEPT_UNVERIFIED"
             if src_file_path not in processed_srcs:
                 processed_srcs.add(src_file_path)
             companion = _transfer_live_companion(
@@ -2320,10 +2329,11 @@ def _process_one_source(
                 row["linked_companion"] = companion
         except Exception as e:
             counters["unexpected"] += 1
-            error = f"{type(e).__name__}: {e}"
+            status = "TRANSFER_FAILED"
+            row["error"] = f"{type(e).__name__}: {e}"
             print(
                 f"ERROR: skipping {_mode_action_label('move' if is_move else 'copy')} "
-                f"src={src_file_path}: {error}"
+                f"src={src_file_path}: {row['error']}"
             )
     else:
         companion = _live_photo_companion_path(src_file_path)
@@ -2334,7 +2344,7 @@ def _process_one_source(
             and not os.path.exists(_dest_file_path(dest_root_dir, metadata_by_path[companion]))
         ):
             row["linked_companion"] = companion
-    row["error"] = error
+    row["status"] = status
     return _log_event(log_file, row, session)
 
 
@@ -2502,7 +2512,7 @@ def cleaup_media_files(
                 counters["unexpected"] += 1
                 row = _log_event(
                     log_file,
-                    {"src": src_file_path, "error": f"AUGMENT_FAILED: {e}"},
+                    {"src": src_file_path, "status": "AUGMENT_FAILED", "error": str(e)},
                     session,
                 )
                 rows.append(row)
@@ -2561,7 +2571,7 @@ def cleaup_media_files(
             )
             rows.append(row)
             row_hash = _metadata_content_hash(metadata)
-            if row_hash and row.get("error") in (
+            if row_hash and row.get("status") in (
                 "",
                 "TRANSFERRED_SOURCE_DELETED",
                 "TRANSFERRED_SOURCE_RENAMED",

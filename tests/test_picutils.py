@@ -140,11 +140,11 @@ def test_live_photo_companion_path(tmp_path):
 
 def test_summarize_run_rows_move_and_duplicates():
     rows = [
-        {"error": "TRANSFERRED_SOURCE_DELETED"},
-        {"error": "IDENTICAL_SOURCE_DELETED"},
-        {"error": "IDENTICAL_DESTINATION_EXISTS"},
-        {"error": "DESTINATION_EXISTS"},
-        {"error": "COLLISION_MOVED_TO_QUARANTINE"},
+        {"status": "TRANSFERRED_SOURCE_DELETED"},
+        {"status": "IDENTICAL_SOURCE_DELETED"},
+        {"status": "IDENTICAL_DESTINATION_EXISTS"},
+        {"status": "DESTINATION_EXISTS"},
+        {"status": "COLLISION_MOVED_TO_QUARANTINE"},
         {"warning": "NO_CAPTURE_DATE_USED_MTIME"},
     ]
     s = picu._summarize_run_rows(rows)
@@ -459,7 +459,7 @@ def test_cleaup_processes_all_sources_in_group(
             progress=False,
         )
     assert len(rows) == 2
-    assert all(r["error"] == "IDENTICAL_SOURCE_DELETED" for r in rows)
+    assert all(r["status"] == "IDENTICAL_SOURCE_DELETED" for r in rows)
     assert not src_a.exists()
     assert not src_b.exists()
 
@@ -489,7 +489,7 @@ def test_cleaup_copy_mode_identical_error(mock_mproc, mock_scan, _mock_augment, 
         move_or_copy="copy",
         progress=False,
     )
-    assert rows[0]["error"] == "IDENTICAL_SOURCE_KEPT"
+    assert rows[0]["status"] == "IDENTICAL_SOURCE_KEPT"
     assert src.exists()
 
 
@@ -521,7 +521,7 @@ def test_cleaup_quarantine_collision(mock_mproc, mock_scan, _mock_augment, tmp_p
         collisions_dir=str(quarantine),
         progress=False,
     )
-    assert rows[0]["error"] == "COLLISION_MOVED_TO_QUARANTINE"
+    assert rows[0]["status"] == "COLLISION_MOVED_TO_QUARANTINE"
     assert not src.exists()
     assert "quarantine_reloc" in rows[0]
     assert os.path.exists(rows[0]["quarantine_reloc"])
